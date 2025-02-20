@@ -2,10 +2,12 @@ package com.example.trafficobjectdetection
 
 import android.graphics.RectF
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.hypot
 
 class Tracker {
     private val trackedObjects = ConcurrentHashMap<Int, TrackedObject>()
     private var nextObjectId = 1
+    private val maxDistanceThreshold = 50f
 
     fun update(detectedBoxes: List<BoundingBox>): Map<Int, BoundingBox> {
         val newTrackedObjects = ConcurrentHashMap<Int, TrackedObject>()
@@ -32,7 +34,7 @@ class Tracker {
 
         trackedObjects.forEach { (id, trackedObj) ->
             val distance = calculateDistance(newBox, trackedObj.boundingBox)
-            if (distance < 50f && distance < bestDistance) {  // 50 pixels threshold
+            if (distance < maxDistanceThreshold && distance < bestDistance) {  // 50 pixels threshold
                 bestMatchId = id
                 bestDistance = distance
             }

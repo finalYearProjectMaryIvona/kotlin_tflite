@@ -24,7 +24,6 @@ import com.example.trafficobjectdetection.Constants.MODEL_PATH
 import com.example.trafficobjectdetection.Constants.LABELS_PATH
 
 
-
 // MainActivity handles camera initialization, image analysis, and object detection
 class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
@@ -42,6 +41,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     // Object detection model
     private var detector: Detector? = null
+    private lateinit var tracker: Tracker
 
     // Background thread for executing camera tasks
     private lateinit var cameraExecutor: ExecutorService
@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()
+        tracker = Tracker()
 
         // Initialize the object detector in a background thread
         cameraExecutor.execute {
@@ -217,9 +218,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     companion object {
         private const val TAG = "Camera" // Log tag
         private const val REQUEST_CODE_PERMISSIONS = 10 // Permission request code
-        private val REQUIRED_PERMISSIONS = mutableListOf (
-            Manifest.permission.CAMERA
-        ).toTypedArray()
+        private val REQUIRED_PERMISSIONS = mutableListOf (Manifest.permission.CAMERA).toTypedArray()
     }
 
     // Callback function when no object is detected
