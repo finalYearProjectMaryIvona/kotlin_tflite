@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     // Object detection model
     private var detector: Detector? = null
-    private lateinit var tracker: Tracker
+    private val tracker = Tracker()
 
     // Background thread for executing camera tasks
     private lateinit var cameraExecutor: ExecutorService
@@ -53,7 +53,6 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()
-        tracker = Tracker()
 
         // Initialize the object detector in a background thread
         cameraExecutor.execute {
@@ -231,10 +230,10 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     // Callback function when objects are detected
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
         runOnUiThread {
-            binding.inferenceTime.text = "${inferenceTime}ms" // Display inference time
+            binding.inferenceTime.text = "${inferenceTime}ms"
             binding.overlay.apply {
-                setResults(boundingBoxes) // Update overlay with detected objects
-                invalidate() // Refresh overlay view
+                setResults(boundingBoxes)
+                invalidate()
             }
         }
     }

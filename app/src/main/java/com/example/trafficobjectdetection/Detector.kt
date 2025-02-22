@@ -16,27 +16,20 @@ import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
 
-
-/**
- * Detector class for performing object detection using TensorFlow Lite.
- */
 class Detector(
-
-    private val context: Context,   // Application context
-    private val modelPath: String,  // Path to the model file
-    private val labelPath: String?, // Path to the label file (optional)
-    private val detectorListener: DetectorListener, // Listener for detection events
-    private val message: (String) -> Unit // Callback function for error messages
-
+    private val context: Context,
+    private val modelPath: String,
+    private val labelPath: String?,
+    private val detectorListener: DetectorListener,
+    private val message: (String) -> Unit
 ) {
-
     private var interpreter: Interpreter
     private var labels = mutableListOf<String>()
-
     private var tensorWidth = 0
     private var tensorHeight = 0
     private var numChannel = 0
     private var numElements = 0
+    private val tracker = ObjectTracker()
 
     private val imageProcessor = ImageProcessor.Builder()
         .add(NormalizeOp(INPUT_MEAN, INPUT_STANDARD_DEVIATION))
@@ -45,9 +38,8 @@ class Detector(
 
     init {
         val compatList = CompatibilityList()
-
-        val options = Interpreter.Options().apply{
-            if(compatList.isDelegateSupportedOnThisDevice){
+        val options = Interpreter.Options().apply {
+            if(compatList.isDelegateSupportedOnThisDevice) {
                 val delegateOptions = compatList.bestOptionsForThisDevice
                 this.addDelegate(GpuDelegate(delegateOptions))
             } else {
@@ -64,7 +56,7 @@ class Detector(
         labels.addAll(extractNamesFromMetadata(model))
         if (labels.isEmpty()) {
             if (labelPath == null) {
-                message("Model not contains metadata, provide LABELS_PATH in Constants.kt")
+                message("Model does not contain metadata, provide LABELS_PATH in Constants.kt")
                 labels.addAll(MetaData.TEMP_CLASSES)
             } else {
                 labels.addAll(extractNamesFromLabelFile(context, labelPath))
@@ -75,7 +67,7 @@ class Detector(
             tensorWidth = inputShape[1]
             tensorHeight = inputShape[2]
 
-            // If in case input shape is in format of [1, 3, ..., ...]
+            // If input shape is in format of [1, 3, ..., ...]
             if (inputShape[1] == 3) {
                 tensorWidth = inputShape[2]
                 tensorHeight = inputShape[3]
@@ -88,16 +80,12 @@ class Detector(
         }
     }
 
-    /**
-     * Restarts the interpreter with or without GPU acceleration.
-     */
     fun restart(isGpu: Boolean) {
         interpreter.close()
-
         val options = if (isGpu) {
             val compatList = CompatibilityList()
-            Interpreter.Options().apply{
-                if(compatList.isDelegateSupportedOnThisDevice){
+            Interpreter.Options().apply {
+                if(compatList.isDelegateSupportedOnThisDevice) {
                     val delegateOptions = compatList.bestOptionsForThisDevice
                     this.addDelegate(GpuDelegate(delegateOptions))
                 } else {
@@ -105,7 +93,7 @@ class Detector(
                 }
             }
         } else {
-            Interpreter.Options().apply{
+            Interpreter.Options().apply {
                 this.setNumThreads(4)
             }
         }
@@ -114,52 +102,39 @@ class Detector(
         interpreter = Interpreter(model, options)
     }
 
-    /**
-     * Closes the interpreter when not needed.
-     */
     fun close() {
         interpreter.close()
     }
 
-    /**
-     * Runs object detection on the given bitmap.
-     */
     fun detect(frame: Bitmap) {
-        if (tensorWidth == 0
-            || tensorHeight == 0
-            || numChannel == 0
-            || numElements == 0) {
+        if (tensorWidth == 0 || tensorHeight == 0 || numChannel == 0 || numElements == 0) {
             return
         }
 
         var inferenceTime = SystemClock.uptimeMillis()
 
         val resizedBitmap = Bitmap.createScaledBitmap(frame, tensorWidth, tensorHeight, false)
-
         val tensorImage = TensorImage(INPUT_IMAGE_TYPE)
         tensorImage.load(resizedBitmap)
         val processedImage = imageProcessor.process(tensorImage)
-        val imageBuffer = processedImage.buffer
 
         val output = TensorBuffer.createFixedSize(intArrayOf(1, numChannel, numElements), OUTPUT_IMAGE_TYPE)
-        interpreter.run(imageBuffer, output.buffer)
+        interpreter.run(processedImage.buffer, output.buffer)
 
-        val bestBoxes = bestBox(output.floatArray)
+        val detectedBoxes = bestBox(output.floatArray)
         inferenceTime = SystemClock.uptimeMillis() - inferenceTime
 
-        if (bestBoxes == null) {
+        if (detectedBoxes == null || detectedBoxes.isEmpty()) {
             detectorListener.onEmptyDetect()
             return
         }
 
-        detectorListener.onDetect(bestBoxes, inferenceTime)
+        // Track objects
+        val trackedBoxes = tracker.update(detectedBoxes)
+        detectorListener.onDetect(trackedBoxes, inferenceTime)
     }
 
-    /**
-     * Filters detected objects based on confidence score.
-     */
-    private fun bestBox(array: FloatArray) : List<BoundingBox>? {
-
+    private fun bestBox(array: FloatArray): List<BoundingBox>? {
         val boundingBoxes = mutableListOf<BoundingBox>()
 
         for (c in 0 until numElements) {
@@ -167,7 +142,8 @@ class Detector(
             var maxIdx = -1
             var j = 4
             var arrayIdx = c + numElements * j
-            while (j < numChannel){
+
+            while (j < numChannel) {
                 if (array[arrayIdx] > maxConf) {
                     maxConf = array[arrayIdx]
                     maxIdx = j - 4
@@ -176,28 +152,26 @@ class Detector(
                 arrayIdx += numElements
             }
 
-            if (maxConf > CONFIDENCE_THRESHOLD) {
+            if (maxConf > CONFIDENCE_THRESHOLD && maxIdx >= 0 && maxIdx < labels.size) {
                 val clsName = labels[maxIdx]
-                val cx = array[c] // 0
-                val cy = array[c + numElements] // 1
+                val cx = array[c]
+                val cy = array[c + numElements]
                 val w = array[c + numElements * 2]
                 val h = array[c + numElements * 3]
                 val x1 = cx - (w/2F)
                 val y1 = cy - (h/2F)
                 val x2 = cx + (w/2F)
                 val y2 = cy + (h/2F)
-                if (x1 < 0F || x1 > 1F) continue
-                if (y1 < 0F || y1 > 1F) continue
-                if (x2 < 0F || x2 > 1F) continue
-                if (y2 < 0F || y2 > 1F) continue
 
-                boundingBoxes.add(
-                    BoundingBox(
-                        x1 = x1, y1 = y1, x2 = x2, y2 = y2,
-                        cx = cx, cy = cy, w = w, h = h,
-                        cnf = maxConf, cls = maxIdx, clsName = clsName
+                if (x1 in 0f..1f && y1 in 0f..1f && x2 in 0f..1f && y2 in 0f..1f) {
+                    boundingBoxes.add(
+                        BoundingBox(
+                            x1 = x1, y1 = y1, x2 = x2, y2 = y2,
+                            cx = cx, cy = cy, w = w, h = h,
+                            cnf = maxConf, cls = maxIdx, clsName = clsName
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -206,10 +180,7 @@ class Detector(
         return applyNMS(boundingBoxes)
     }
 
-    /**
-     * Applies Non-Maximum Suppression (NMS) to remove duplicate detections.
-     */
-    private fun applyNMS(boxes: List<BoundingBox>) : MutableList<BoundingBox> {
+    private fun applyNMS(boxes: List<BoundingBox>): MutableList<BoundingBox> {
         val sortedBoxes = boxes.sortedByDescending { it.cnf }.toMutableList()
         val selectedBoxes = mutableListOf<BoundingBox>()
 
@@ -230,9 +201,7 @@ class Detector(
 
         return selectedBoxes
     }
-    /**
-     * Computes Intersection Over Union (IoU) for bounding box filtering.
-     */
+
     private fun calculateIoU(box1: BoundingBox, box2: BoundingBox): Float {
         val x1 = maxOf(box1.x1, box2.x1)
         val y1 = maxOf(box1.y1, box2.y1)
@@ -254,7 +223,152 @@ class Detector(
         private const val INPUT_STANDARD_DEVIATION = 255f
         private val INPUT_IMAGE_TYPE = DataType.FLOAT32
         private val OUTPUT_IMAGE_TYPE = DataType.FLOAT32
-        private const val CONFIDENCE_THRESHOLD = 0.3F
+        private const val CONFIDENCE_THRESHOLD = 0.45F
         private const val IOU_THRESHOLD = 0.5F
+    }
+
+    data class TrackedObject(
+        var box: BoundingBox,
+        var direction: String = "",
+        var lastPosition: Pair<Float, Float>? = null
+    )
+
+    private inner class ObjectTracker {
+        private var nextObjectId = 0
+        private val objects = mutableMapOf<Int, TrackedObject>()
+        private val maxDisappeared = 15
+        private val disappeared = mutableMapOf<Int, Int>()
+        private val MERGE_IOU_THRESHOLD = 0.7f  // Threshold for merging overlapping boxes
+
+        fun update(detectedBoxes: List<BoundingBox>): List<BoundingBox> {
+            // Handle no detections
+            if (detectedBoxes.isEmpty()) {
+                val objectIds = ArrayList(disappeared.keys)
+                for (objectId in objectIds) {
+                    disappeared[objectId] = disappeared[objectId]!! + 1
+                    if (disappeared[objectId]!! > maxDisappeared) {
+                        objects.remove(objectId)
+                        disappeared.remove(objectId)
+                    }
+                }
+                return emptyList()
+            }
+
+            // If not tracking any objects, register all detections
+            if (objects.isEmpty()) {
+                detectedBoxes.forEach { box ->
+                    objects[nextObjectId] = TrackedObject(box)
+                    disappeared[nextObjectId] = 0
+                    nextObjectId++
+                }
+            } else {
+                // Match existing objects with new detections
+                val matches = findMatches(detectedBoxes)
+
+                // Update matched objects
+                matches.forEach { (objectId, boxIndex) ->
+                    val trackedObject = objects[objectId]!!
+                    trackedObject.lastPosition = Pair(trackedObject.box.cx, trackedObject.box.cy)
+                    trackedObject.box = detectedBoxes[boxIndex]
+
+                    // Update direction
+                    trackedObject.lastPosition?.let { lastPos ->
+                        val dx = trackedObject.box.cx - lastPos.first
+                        val dy = trackedObject.box.cy - lastPos.second
+                        trackedObject.direction = when {
+                            dx < -0.02f && dy < -0.02f -> "Down Left"
+                            dx > 0.02f && dy < -0.02f -> "Down Right"
+                            dx < -0.02f && dy > 0.02f -> "Up Left"
+                            dx > 0.02f && dy > 0.02f -> "Up Right"
+                            dx < -0.02f -> "Left"
+                            dx > 0.02f -> "Right"
+                            dy < -0.02f -> "Down"
+                            dy > 0.02f -> "Up"
+                            else -> ""
+                        }
+                    }
+                    disappeared[objectId] = 0
+                }
+
+                // Register new detections
+                val matched = matches.values.toSet()
+                for (i in detectedBoxes.indices) {
+                    if (i !in matched) {
+                        objects[nextObjectId] = TrackedObject(detectedBoxes[i])
+                        disappeared[nextObjectId] = 0
+                        nextObjectId++
+                    }
+                }
+            }
+
+            // Merge overlapping boxes
+            val mergedObjects = mutableMapOf<Int, TrackedObject>()
+            val objectsToProcess = objects.toList()  // Create a copy for safe iteration
+            val processedIds = mutableSetOf<Int>()
+
+            for ((id1, obj1) in objectsToProcess) {
+                if (id1 !in processedIds) {
+                    var bestBox = obj1.box
+                    var bestConf = obj1.box.cnf
+                    var direction = obj1.direction
+
+                    for ((id2, obj2) in objectsToProcess) {
+                        if (id1 != id2 && id2 !in processedIds) {
+                            val iou = calculateIoU(obj1.box, obj2.box)
+                            if (iou > MERGE_IOU_THRESHOLD) {
+                                // Merge boxes by taking the one with higher confidence
+                                if (obj2.box.cnf > bestConf) {
+                                    bestBox = obj2.box
+                                    bestConf = obj2.box.cnf
+                                    direction = obj2.direction
+                                }
+                                processedIds.add(id2)
+                            }
+                        }
+                    }
+
+                    processedIds.add(id1)
+                    mergedObjects[id1] = TrackedObject(bestBox, direction, obj1.lastPosition)
+                }
+            }
+
+            // Update objects safely
+            objects.clear()
+            objects.putAll(mergedObjects)
+
+            // Return tracked boxes with IDs and directions
+            return objects.map { (id, tracked) ->
+                tracked.box.copy(
+                    clsName = "${tracked.box.clsName}\nID $id\n${tracked.direction}"
+                )
+            }
+        }
+
+        private fun findMatches(detectedBoxes: List<BoundingBox>): Map<Int, Int> {
+            val matches = mutableMapOf<Int, Int>()
+            val usedDetections = mutableSetOf<Int>()
+
+            objects.forEach { (objectId, trackedObject) ->
+                var bestMatch = -1
+                var bestIoU = 0f
+
+                for (i in detectedBoxes.indices) {
+                    if (i !in usedDetections) {
+                        val iou = calculateIoU(trackedObject.box, detectedBoxes[i])
+                        if (iou > bestIoU && iou > 0.3f) {
+                            bestIoU = iou
+                            bestMatch = i
+                        }
+                    }
+                }
+
+                if (bestMatch >= 0) {
+                    matches[objectId] = bestMatch
+                    usedDetections.add(bestMatch)
+                }
+            }
+
+            return matches
+        }
     }
 }
