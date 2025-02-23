@@ -1,7 +1,7 @@
 package com.example.trafficobjectdetection
 
-import kotlin.math.sqrt
 import java.util.LinkedHashMap
+import kotlin.math.sqrt
 
 class Tracker(private val maxDisappeared: Int = 30) {
     private var nextObjectId = 0
@@ -63,7 +63,8 @@ class Tracker(private val maxDisappeared: Int = 30) {
                 val col = dist.second
 
                 if (!usedRows.contains(row) && !usedCols.contains(col) &&
-                    dist.third < MAX_DISTANCE_THRESHOLD) {
+                    dist.third < MAX_DISTANCE_THRESHOLD
+                ) {
                     pairs.add(Pair(row, col))
                     usedRows.add(row)
                     usedCols.add(col)

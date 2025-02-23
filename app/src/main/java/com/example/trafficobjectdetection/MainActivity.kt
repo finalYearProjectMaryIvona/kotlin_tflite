@@ -17,12 +17,11 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.example.trafficobjectdetection.Constants.LABELS_PATH
+import com.example.trafficobjectdetection.Constants.MODEL_PATH
 import com.example.trafficobjectdetection.databinding.ActivityMainBinding
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import com.example.trafficobjectdetection.Constants.MODEL_PATH
-import com.example.trafficobjectdetection.Constants.LABELS_PATH
-
 
 // MainActivity handles camera initialization, image analysis, and object detection
 class MainActivity : AppCompatActivity(), Detector.DetectorListener {
@@ -93,7 +92,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
-            cameraProvider  = cameraProviderFuture.get()
+            cameraProvider = cameraProviderFuture.get()
             bindCameraUseCases()
         }, ContextCompat.getMainExecutor(this))
     }
@@ -111,7 +110,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             .build()
 
         // Configure camera preview
-        preview =  Preview.Builder()
+        preview = Preview.Builder()
             .setTargetAspectRatio(AspectRatio.RATIO_4_3)
             .setTargetRotation(rotation)
             .build()
@@ -152,8 +151,13 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
             // Create a rotated bitmap
             val rotatedBitmap = Bitmap.createBitmap(
-                bitmapBuffer, 0, 0, bitmapBuffer.width, bitmapBuffer.height,
-                matrix, true
+                bitmapBuffer,
+                0,
+                0,
+                bitmapBuffer.width,
+                bitmapBuffer.height,
+                matrix,
+                true
             )
 
             // Run object detection on the processed image
@@ -174,7 +178,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
             // Attach the preview to the UI
             preview?.surfaceProvider = binding.viewFinder.surfaceProvider
-        } catch(exc: Exception) {
+        } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
     }
@@ -186,7 +190,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     // Request permissions if not granted
     private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()) {
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
         if (it[Manifest.permission.CAMERA] == true) { startCamera() }
     }
 
@@ -217,7 +222,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     companion object {
         private const val TAG = "Camera" // Log tag
         private const val REQUEST_CODE_PERMISSIONS = 10 // Permission request code
-        private val REQUIRED_PERMISSIONS = mutableListOf (Manifest.permission.CAMERA).toTypedArray()
+        private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).toTypedArray()
     }
 
     // Callback function when no object is detected

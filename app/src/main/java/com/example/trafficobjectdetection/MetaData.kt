@@ -22,7 +22,7 @@ object MetaData {
 
             val regex2 = Regex("\"([^\"]*)\"|'([^']*)'")
             val match2 = regex2.findAll(namesContent)
-            val list = match2.map { it.groupValues[1].ifEmpty { it.groupValues[2] }}.toList()
+            val list = match2.map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toList()
 
             return list
         } catch (_: Exception) {
@@ -49,7 +49,6 @@ object MetaData {
             return emptyList()
         }
     }
-
 
     val TEMP_CLASSES = List(1000) { "class${it + 1}" }
 }

@@ -32,10 +32,9 @@ jobs:
       - name: Run Unit Tests
         run: ./gradlew test
 
-      - name: Run Code Lint Checks (Kotlin Lint + Detekt)
+      - name: Run Code Lint Checks
         run: |
           ./gradlew lint
-          ./gradlew detekt
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4

@@ -39,7 +39,7 @@ class Detector(
     init {
         val compatList = CompatibilityList()
         val options = Interpreter.Options().apply {
-            if(compatList.isDelegateSupportedOnThisDevice) {
+            if (compatList.isDelegateSupportedOnThisDevice) {
                 val delegateOptions = compatList.bestOptionsForThisDevice
                 this.addDelegate(GpuDelegate(delegateOptions))
             } else {
@@ -85,7 +85,7 @@ class Detector(
         val options = if (isGpu) {
             val compatList = CompatibilityList()
             Interpreter.Options().apply {
-                if(compatList.isDelegateSupportedOnThisDevice) {
+                if (compatList.isDelegateSupportedOnThisDevice) {
                     val delegateOptions = compatList.bestOptionsForThisDevice
                     this.addDelegate(GpuDelegate(delegateOptions))
                 } else {
@@ -158,10 +158,10 @@ class Detector(
                 val cy = array[c + numElements]
                 val w = array[c + numElements * 2]
                 val h = array[c + numElements * 3]
-                val x1 = cx - (w/2F)
-                val y1 = cy - (h/2F)
-                val x2 = cx + (w/2F)
-                val y2 = cy + (h/2F)
+                val x1 = cx - (w / 2F)
+                val y1 = cy - (h / 2F)
+                val x2 = cx + (w / 2F)
+                val y2 = cy + (h / 2F)
 
                 if (x1 in 0f..1f && y1 in 0f..1f && x2 in 0f..1f && y2 in 0f..1f) {
                     boundingBoxes.add(
@@ -184,7 +184,7 @@ class Detector(
         val sortedBoxes = boxes.sortedByDescending { it.cnf }.toMutableList()
         val selectedBoxes = mutableListOf<BoundingBox>()
 
-        while(sortedBoxes.isNotEmpty()) {
+        while (sortedBoxes.isNotEmpty()) {
             val first = sortedBoxes.first()
             selectedBoxes.add(first)
             sortedBoxes.remove(first)
@@ -238,7 +238,7 @@ class Detector(
         private val objects = mutableMapOf<Int, TrackedObject>()
         private val maxDisappeared = 15
         private val disappeared = mutableMapOf<Int, Int>()
-        private val MERGE_IOU_THRESHOLD = 0.7f  // Threshold for merging overlapping boxes
+        private val MERGE_IOU_THRESHOLD = 0.7f // Threshold for merging overlapping boxes
 
         fun update(detectedBoxes: List<BoundingBox>): List<BoundingBox> {
             // Handle no detections
@@ -303,7 +303,7 @@ class Detector(
 
             // Merge overlapping boxes
             val mergedObjects = mutableMapOf<Int, TrackedObject>()
-            val objectsToProcess = objects.toList()  // Create a copy for safe iteration
+            val objectsToProcess = objects.toList() // Create a copy for safe iteration
             val processedIds = mutableSetOf<Int>()
 
             for ((id1, obj1) in objectsToProcess) {
