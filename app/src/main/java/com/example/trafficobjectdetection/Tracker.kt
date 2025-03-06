@@ -1,6 +1,5 @@
 package com.example.trafficobjectdetection
 
-import java.util.LinkedHashMap
 import kotlin.math.sqrt
 
 class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
