@@ -34,6 +34,7 @@ android {
     }
     kotlinOptions {
         jvmTarget = "1.8"
+        freeCompilerArgs += "-Xallow-breaking-and-continuing-from-lambdas"
     }
     buildFeatures {
         compose = true
@@ -105,5 +106,8 @@ dependencies {
 
 // Instrumentation Testing (MockK for Android)
     androidTestImplementation ("io.mockk:mockk-android:1.13.5")
+
+
+
 
 }

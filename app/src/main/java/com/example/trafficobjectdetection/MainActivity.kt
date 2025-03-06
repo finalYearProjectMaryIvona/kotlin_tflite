@@ -40,7 +40,15 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
     // Object detection model
     private var detector: Detector? = null
-    private val tracker = Tracker()
+
+    private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
+        override fun onTrackingCleared() {
+            runOnUiThread {
+                binding.overlay.clear() // Clear UI when tracking stops
+            }
+        }
+    })
+
 
     // Background thread for executing camera tasks
     private lateinit var cameraExecutor: ExecutorService
@@ -236,9 +244,12 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     override fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long) {
         runOnUiThread {
             binding.inferenceTime.text = "${inferenceTime}ms"
-            binding.overlay.apply {
-                setResults(boundingBoxes)
-                invalidate()
+
+            if (boundingBoxes.isEmpty()) {
+                binding.overlay.clear() // Clear when no objects are detected
+            } else {
+                binding.overlay.setResults(boundingBoxes)
+                binding.overlay.invalidate()
             }
         }
     }
