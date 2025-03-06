@@ -3,19 +3,24 @@ package com.example.trafficobjectdetection
 import java.util.LinkedHashMap
 import kotlin.math.sqrt
 
-class Tracker(private val maxDisappeared: Int = 30) {
-    private var nextObjectId = 0
+class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
+    private var nextObjectId = 1
     private val objects = LinkedHashMap<Int, TrackedObject>()
     private val disappeared = LinkedHashMap<Int, Int>()
 
+    // Track last assigned ID for each class type
+    private val idRegistry = mutableMapOf<String, Int>()
+
     data class TrackedObject(
-        var centroid: Pair<Float, Float>,
+        val id: Int,  // Add unique ID for each tracked object
+        var centroid: Pair<Float, Float>, // Center of the bounding box
         var boundingBox: BoundingBox,
-        var direction: String = "",
-        var lastPosition: Pair<Float, Float>? = null
+        val className: String, // Object class ("Car", "Person", ...)
+        var direction: String = "", // Direction of object
+        var lastPosition: Pair<Float, Float>? = null // Last known position for tracking direction
     )
 
-    fun update(detectedBoxes: List<BoundingBox>): Map<Int, TrackedObject> {
+    fun update(detectedBoxes: List<BoundingBox>): List<BoundingBox> {
         // Handle case when no detections are present
         if (detectedBoxes.isEmpty()) {
             val objectIds = ArrayList(disappeared.keys)
@@ -25,20 +30,25 @@ class Tracker(private val maxDisappeared: Int = 30) {
                     deregister(objectId)
                 }
             }
-            return objects
+            // If no objects remain, notify the detectorListener to clear UI
+            if (objects.isEmpty()) listener.onTrackingCleared()
+
+            return objects.map { (_, tracked) ->
+                tracked.boundingBox.copy(
+                    clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
+                )
+            }
         }
 
         // Calculate centroids for current detections
         val inputCentroids = detectedBoxes.map { box ->
-            val centroidX = (box.x1 + box.x2) / 2
-            val centroidY = (box.y1 + box.y2) / 2
-            Pair(centroidX, centroidY)
+            Pair((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2)
         }
 
         // Register new objects if we're not tracking any yet
         if (objects.isEmpty()) {
             for (i in detectedBoxes.indices) {
-                register(inputCentroids[i], detectedBoxes[i])
+                register(detectedBoxes[i], inputCentroids[i])
             }
         } else {
             // Match existing objects with new detections
@@ -51,14 +61,14 @@ class Tracker(private val maxDisappeared: Int = 30) {
             // Find best matches using minimum distances
             val usedRows = mutableSetOf<Int>()
             val usedCols = mutableSetOf<Int>()
-
             // Sort distances and match closest pairs
             val pairs = mutableListOf<Pair<Int, Int>>()
-            val flatDistances = distances.flatMapIndexed { row, cols ->
+
+            val sortedDistances = distances.flatMapIndexed { row, cols ->
                 cols.mapIndexed { col, dist -> Triple(row, col, dist) }
             }.sortedBy { it.third }
 
-            for (dist in flatDistances) {
+            for (dist in sortedDistances) {
                 val row = dist.first
                 val col = dist.second
 
@@ -76,22 +86,16 @@ class Tracker(private val maxDisappeared: Int = 30) {
                 val objectId = objectIds[row]
                 val trackedObject = objects[objectId]!!
 
-                // Store last position before updating
-                trackedObject.lastPosition = trackedObject.centroid
-
-                // Update position and bounding box
-                trackedObject.centroid = inputCentroids[col]
-                trackedObject.boundingBox = detectedBoxes[col]
-
-                // Calculate direction
-                trackedObject.lastPosition?.let { lastPos ->
-                    trackedObject.direction = calculateDirection(
-                        lastPos,
-                        trackedObject.centroid
-                    )
+                // Keep same ID if same class
+                if (trackedObject.className == detectedBoxes[col].clsName) {
+                    trackedObject.lastPosition = trackedObject.centroid
+                    trackedObject.centroid = inputCentroids[col]
+                    trackedObject.boundingBox = detectedBoxes[col]
+                    trackedObject.direction = calculateDirection(trackedObject.lastPosition ?: trackedObject.centroid, trackedObject.centroid)
+                    disappeared[objectId] = 0
+                } else {
+                    register(detectedBoxes[col], inputCentroids[col])
                 }
-
-                disappeared[objectId] = 0
             }
 
             // Handle unmatched objects and detections
@@ -109,15 +113,26 @@ class Tracker(private val maxDisappeared: Int = 30) {
 
             // Register new objects for unmatched detections
             for (col in unusedCols) {
-                register(inputCentroids[col], detectedBoxes[col])
+                register(detectedBoxes[col], inputCentroids[col])
             }
         }
 
-        return objects
+        return objects.map { (_, tracked) ->
+            tracked.boundingBox.copy(
+                clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
+            )
+        }
     }
 
-    private fun register(centroid: Pair<Float, Float>, boundingBox: BoundingBox) {
-        objects[nextObjectId] = TrackedObject(centroid, boundingBox)
+    private fun register(boundingBox: BoundingBox, centroid: Pair<Float, Float>) {
+        // Get class name
+        val className = boundingBox.clsName
+
+        // Get next id for this class type, start at 1 if first time seen
+        val classId = idRegistry.getOrDefault(className, 0) + 1
+        idRegistry[className] = classId  // Update counter
+
+        objects[nextObjectId] = TrackedObject(classId, centroid, boundingBox, className)
         disappeared[nextObjectId] = 0
         nextObjectId++
     }
@@ -125,6 +140,11 @@ class Tracker(private val maxDisappeared: Int = 30) {
     private fun deregister(objectId: Int) {
         objects.remove(objectId)
         disappeared.remove(objectId)
+
+        // Notify listener when no objects remain
+        if (objects.isEmpty()) {
+            listener.onTrackingCleared()
+        }
     }
 
     private fun calculateDistanceMatrix(
@@ -142,6 +162,19 @@ class Tracker(private val maxDisappeared: Int = 30) {
         val dx = p1.first - p2.first
         val dy = p1.second - p2.second
         return sqrt(dx * dx + dy * dy)
+    }
+
+    private fun calculateIoU(box1: BoundingBox, box2: BoundingBox): Float {
+        val x1 = maxOf(box1.x1, box2.x1)
+        val y1 = maxOf(box1.y1, box2.y1)
+        val x2 = minOf(box1.x2, box2.x2)
+        val y2 = minOf(box1.y2, box2.y2)
+
+        val intersectionArea = maxOf(0F, x2 - x1) * maxOf(0F, y2 - y1)
+        val box1Area = box1.w * box1.h
+        val box2Area = box2.w * box2.h
+
+        return intersectionArea / (box1Area + box2Area - intersectionArea)
     }
 
     private fun calculateDirection(
@@ -168,4 +201,9 @@ class Tracker(private val maxDisappeared: Int = 30) {
         private const val MAX_DISTANCE_THRESHOLD = 100f
         private const val DIRECTION_THRESHOLD = 0.02f
     }
+}
+
+// Tracker Listener Interface
+interface TrackerListener {
+    fun onTrackingCleared()
 }
