@@ -15,6 +15,7 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
+import com.example.trafficobjectdetection.TrackerListener
 
 class Detector(
     private val context: Context,
@@ -29,8 +30,15 @@ class Detector(
     private var tensorHeight = 0
     private var numChannel = 0
     private var numElements = 0
-    private val tracker = ObjectTracker()
 
+    // Tracker instance to handle object tracking
+    private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
+        override fun onTrackingCleared() {
+            detectorListener.onEmptyDetect() // Clears UI when tracking is empty
+        }
+    })
+
+    // Image processor for normalizing and casting image data
     private val imageProcessor = ImageProcessor.Builder()
         .add(NormalizeOp(INPUT_MEAN, INPUT_STANDARD_DEVIATION))
         .add(CastOp(INPUT_IMAGE_TYPE))
@@ -43,16 +51,18 @@ class Detector(
                 val delegateOptions = compatList.bestOptionsForThisDevice
                 this.addDelegate(GpuDelegate(delegateOptions))
             } else {
-                this.setNumThreads(4)
+                this.setNumThreads(4) // Set CPU threads if GPU is not available
             }
         }
 
         val model = FileUtil.loadMappedFile(context, modelPath)
         interpreter = Interpreter(model, options)
 
+        // Extract input and output tensor shapes
         val inputShape = interpreter.getInputTensor(0)?.shape()
         val outputShape = interpreter.getOutputTensor(0)?.shape()
 
+        // Load labels from metadata or file
         labels.addAll(extractNamesFromMetadata(model))
         if (labels.isEmpty()) {
             if (labelPath == null) {
@@ -80,6 +90,7 @@ class Detector(
         }
     }
 
+    // Restart interpreter
     fun restart(isGpu: Boolean) {
         interpreter.close()
         val options = if (isGpu) {
@@ -106,6 +117,7 @@ class Detector(
         interpreter.close()
     }
 
+    // Runs object detection on image frame
     fun detect(frame: Bitmap) {
         if (tensorWidth == 0 || tensorHeight == 0 || numChannel == 0 || numElements == 0) {
             return
@@ -113,6 +125,7 @@ class Detector(
 
         var inferenceTime = SystemClock.uptimeMillis()
 
+        // Resize input image to match model input dimensions
         val resizedBitmap = Bitmap.createScaledBitmap(frame, tensorWidth, tensorHeight, false)
         val tensorImage = TensorImage(INPUT_IMAGE_TYPE)
         tensorImage.load(resizedBitmap)
@@ -130,10 +143,16 @@ class Detector(
         }
 
         // Track objects
+        tracker.update(detectedBoxes)
+
+        // Get the formatted bounding boxes with IDs
         val trackedBoxes = tracker.update(detectedBoxes)
+
+        // Send to the UI
         detectorListener.onDetect(trackedBoxes, inferenceTime)
     }
 
+    // Extracts bounding boxes
     private fun bestBox(array: FloatArray): List<BoundingBox>? {
         val boundingBoxes = mutableListOf<BoundingBox>()
 
@@ -143,6 +162,7 @@ class Detector(
             var j = 4
             var arrayIdx = c + numElements * j
 
+            // Find class with highest confidence
             while (j < numChannel) {
                 if (array[arrayIdx] > maxConf) {
                     maxConf = array[arrayIdx]
@@ -152,6 +172,7 @@ class Detector(
                 arrayIdx += numElements
             }
 
+            // If confidence is high, set bounding box
             if (maxConf > CONFIDENCE_THRESHOLD && maxIdx >= 0 && maxIdx < labels.size) {
                 val clsName = labels[maxIdx]
                 val cx = array[c]
@@ -177,7 +198,7 @@ class Detector(
 
         if (boundingBoxes.isEmpty()) return null
 
-        return applyNMS(boundingBoxes)
+        return applyNMS(boundingBoxes) // Non-Maximum Suppression
     }
 
     private fun applyNMS(boxes: List<BoundingBox>): MutableList<BoundingBox> {
@@ -210,6 +231,7 @@ class Detector(
         val intersectionArea = maxOf(0F, x2 - x1) * maxOf(0F, y2 - y1)
         val box1Area = box1.w * box1.h
         val box2Area = box2.w * box2.h
+
         return intersectionArea / (box1Area + box2Area - intersectionArea)
     }
 
@@ -355,7 +377,7 @@ class Detector(
                 for (i in detectedBoxes.indices) {
                     if (i !in usedDetections) {
                         val iou = calculateIoU(trackedObject.box, detectedBoxes[i])
-                        if (iou > bestIoU && iou > 0.3f) {
+                        if (iou > bestIoU && iou > 0.5f) {
                             bestIoU = iou
                             bestMatch = i
                         }
