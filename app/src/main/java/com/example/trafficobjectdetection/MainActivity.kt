@@ -3,25 +3,15 @@ package com.example.trafficobjectdetection
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.media.MediaMetadataRetriever
-import android.net.Uri
 import android.os.Bundle
 import android.util.Log
-import android.util.Size
-import android.view.View
-import android.widget.MediaController
 import android.widget.Toast
-import android.widget.ToggleButton
-import android.widget.VideoView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.AspectRatio
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -30,9 +20,6 @@ import androidx.core.content.ContextCompat
 import com.example.trafficobjectdetection.Constants.LABELS_PATH
 import com.example.trafficobjectdetection.Constants.MODEL_PATH
 import com.example.trafficobjectdetection.databinding.ActivityMainBinding
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -54,17 +41,6 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     // Object detection model
     private var detector: Detector? = null
 
-    //toggle button for video/camera
-    private lateinit var sourceToggle: ToggleButton
-    //video
-    private var isUsingVideo = false
-    private var isVideoPlaying = false
-    private lateinit var videoView: VideoView
-    private lateinit var mediaController: MediaController
-
-    private lateinit var videoExecutor: ExecutorService
-
-
     private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
         override fun onTrackingCleared() {
             runOnUiThread {
@@ -73,6 +49,14 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         }
     })
 
+    // Vehicle tracker for logging exit events
+    private val vehicleTracker = VehicleTracker(object : ServerReporter {
+        override fun sendData(data: Map<String, Any>) {
+            // For now, just log the data
+            // In a real implementation, this would send to a database
+            Log.d("VehicleDatabase", data.toString())
+        }
+    })
 
     // Background thread for executing camera tasks
     private lateinit var cameraExecutor: ExecutorService
@@ -82,38 +66,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Initialize UI elements
-        videoView = binding.videoView
-        sourceToggle = binding.sourceToggle
-
-        // Set up MediaController for video controls
-        mediaController = MediaController(this)
-        mediaController.setAnchorView(videoView)
-        videoView.setMediaController(mediaController)
-
-        // Loop video on completion
-        videoView.setOnCompletionListener {
-            if (isUsingVideo) {
-                videoView.start()
-            }
-        }
-
-        // Set error listener
-        videoView.setOnErrorListener { _, what, extra ->
-            Log.e("VideoView", "Error playing video: what=$what, extra=$extra")
-            toast("Error playing video")
-            false
-        }
-
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()
 
-        videoExecutor = Executors.newSingleThreadExecutor()
-
-        // Initialize object detector
-        detector = Detector(baseContext, Constants.MODEL_PATH, Constants.LABELS_PATH, this) {
-            toast(it)
-        }
         // Initialize the object detector in a background thread
         cameraExecutor.execute {
             detector = Detector(baseContext, MODEL_PATH, LABELS_PATH, this) {
@@ -121,21 +76,14 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             }
         }
 
+        // Initialize the vehicle tracker
+        vehicleTracker.initialize()
+
         // Check if the required permissions are granted, if yes, start the camera
         if (allPermissionsGranted()) {
             startCamera()
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
-        }
-
-        // Toggle button for switching between camera and video
-        sourceToggle.setOnCheckedChangeListener { _, isChecked ->
-            isUsingVideo = isChecked
-            if (isUsingVideo) {
-                startVideoPlayback()
-            } else {
-                startCamera()
-            }
         }
 
         // Setup UI listeners
@@ -159,133 +107,12 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         }
     }
 
-    private fun startVideoPlayback() {
-        try {
-            // Stop camera before starting video
-            cameraProvider?.unbindAll()
-
-            // Set visibility
-            binding.viewFinder.visibility = View.GONE
-            videoView.visibility = View.VISIBLE
-            binding.overlay.visibility = View.VISIBLE
-
-            // Load video from assets
-            val videoFile = copyVideoFromAssets("test_video.mp4")
-            val videoUri = Uri.fromFile(videoFile)
-            videoView.setVideoURI(videoUri)
-
-            // Start playing video
-            videoView.requestFocus()
-            videoView.start()
-            isVideoPlaying = true
-
-            // Start frame processing thread for object detection
-            videoExecutor.execute {
-                while (isUsingVideo && isVideoPlaying) {
-                    try {
-                        val bitmap = captureFrameFromVideoView()
-                        bitmap?.let {
-                            detector?.detect(it)
-                            it.recycle()
-                        }
-                        Thread.sleep(100) // Process at 10 FPS
-                    } catch (e: Exception) {
-                        Log.e("VideoProcessing", "Error: ${e.message}")
-                        Thread.sleep(100)
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("VideoPlayback", "Error: ${e.message}")
-            toast("Error playing video")
-        }
-    }
-
-    /**
-    * Capture the current frame from the VideoView.
-    */
-    private fun captureFrameFromVideoView(): Bitmap? {
-        return try {
-            val retriever = MediaMetadataRetriever()
-            val videoFile = copyVideoFromAssets("test_video2.mp4")
-            retriever.setDataSource(videoFile.absolutePath)
-
-            val bitmap = retriever.getFrameAtTime(
-                videoView.currentPosition * 1000L, // Convert ms to µs
-                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-            )
-
-            retriever.release()
-            bitmap
-        } catch (e: Exception) {
-            Log.e("VideoProcessing", "Error capturing frame: ${e.message}")
-            null
-        }
-    }
-
-    /**
-     * Copy video from assets to internal storage.
-     */
-    private fun copyVideoFromAssets(filename: String): File {
-        val file = File(cacheDir, filename)
-        if (!file.exists()) {
-            val inputStream: InputStream = assets.open(filename)
-            val outputStream = FileOutputStream(file)
-            inputStream.copyTo(outputStream)
-            inputStream.close()
-            outputStream.close()
-        }
-        return file
-    }
-
-
     // Function to initialize and start the camera
-    @OptIn(ExperimentalGetImage::class)
     private fun startCamera() {
-        // Stop video playback if it was running
-        if (videoView.isPlaying) {
-            videoView.stopPlayback()
-        }
-        isVideoPlaying = false
-        // Show camera UI
-        binding.viewFinder.visibility = View.VISIBLE
-        videoView.visibility = View.GONE
-        binding.overlay.visibility = View.VISIBLE
-
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener({
             cameraProvider = cameraProviderFuture.get()
             bindCameraUseCases()
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            val preview = Preview.Builder().build()
-            val imageAnalyzer = ImageAnalysis.Builder()
-                .setTargetResolution(Size(640, 480))
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .build()
-
-            imageAnalyzer.setAnalyzer(cameraExecutor) { imageProxy ->
-                try {
-                    val image = imageProxy.image ?: return@setAnalyzer
-                    val yuvToJpegConverter = YuvToJpegConverter()
-                    val jpegBytes = yuvToJpegConverter.convert(image)
-
-                    if (jpegBytes != null) {
-                        val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
-                        detector?.detect(bitmap)
-                        bitmap.recycle()
-                    }
-                } catch (e: Exception) {
-                    Log.e("CameraProcessing", "Error: ${e.message}")
-                } finally {
-                    imageProxy.close()
-                }
-            }
-
-            cameraProvider?.unbindAll()
-            cameraProvider?.bindToLifecycle(this, cameraSelector, preview, imageAnalyzer)
-            preview.setSurfaceProvider(binding.viewFinder.surfaceProvider)
-
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -399,7 +226,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         super.onDestroy()
         detector?.close() // Close the object detector
         cameraExecutor.shutdown() // Shutdown the background executor
-        videoExecutor.shutdown()
+        vehicleTracker.clear() // Clear vehicle tracking data
     }
 
     // Restart camera when returning to the app
@@ -433,6 +260,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             if (boundingBoxes.isEmpty()) {
                 binding.overlay.clear() // Clear when no objects are detected
             } else {
+                // Process vehicle tracking (entry and exit events)
+                vehicleTracker.processDetections(boundingBoxes)
+
                 binding.overlay.setResults(boundingBoxes)
                 binding.overlay.invalidate()
             }

@@ -15,7 +15,6 @@ import org.tensorflow.lite.support.common.ops.NormalizeOp
 import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
-import com.example.trafficobjectdetection.TrackerListener
 
 class Detector(
     private val context: Context,
@@ -175,23 +174,27 @@ class Detector(
             // If confidence is high, set bounding box
             if (maxConf > CONFIDENCE_THRESHOLD && maxIdx >= 0 && maxIdx < labels.size) {
                 val clsName = labels[maxIdx]
-                val cx = array[c]
-                val cy = array[c + numElements]
-                val w = array[c + numElements * 2]
-                val h = array[c + numElements * 3]
-                val x1 = cx - (w / 2F)
-                val y1 = cy - (h / 2F)
-                val x2 = cx + (w / 2F)
-                val y2 = cy + (h / 2F)
 
-                if (x1 in 0f..1f && y1 in 0f..1f && x2 in 0f..1f && y2 in 0f..1f) {
-                    boundingBoxes.add(
-                        BoundingBox(
-                            x1 = x1, y1 = y1, x2 = x2, y2 = y2,
-                            cx = cx, cy = cy, w = w, h = h,
-                            cnf = maxConf, cls = maxIdx, clsName = clsName
+                // Only process target classes
+                if (clsName.lowercase() in Constants.TARGET_CLASSES) {
+                    val cx = array[c]
+                    val cy = array[c + numElements]
+                    val w = array[c + numElements * 2]
+                    val h = array[c + numElements * 3]
+                    val x1 = cx - (w / 2F)
+                    val y1 = cy - (h / 2F)
+                    val x2 = cx + (w / 2F)
+                    val y2 = cy + (h / 2F)
+
+                    if (x1 in 0f..1f && y1 in 0f..1f && x2 in 0f..1f && y2 in 0f..1f) {
+                        boundingBoxes.add(
+                            BoundingBox(
+                                x1 = x1, y1 = y1, x2 = x2, y2 = y2,
+                                cx = cx, cy = cy, w = w, h = h,
+                                cnf = maxConf, cls = maxIdx, clsName = clsName
+                            )
                         )
-                    )
+                    }
                 }
             }
         }

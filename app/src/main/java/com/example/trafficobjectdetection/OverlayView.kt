@@ -69,6 +69,13 @@ class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs
             val right = box.x2 * width
             val bottom = box.y2 * height
 
+            // Get color based on class type
+            val classType = box.clsName.lowercase().split(" ")[0]
+            val classColor = Constants.CLASS_COLORS[classType] ?: Triple(255, 0, 0) // Default to red
+
+            // Set box color for this specific class
+            boxPaint.color = Color.rgb(classColor.first, classColor.second, classColor.third)
+
             // Draw bounding box
             canvas.drawRect(left, top, right, bottom, boxPaint)
 
