@@ -93,6 +93,15 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                     trackedObject.boundingBox = detectedBoxes[col]
                     trackedObject.direction = calculateDirection(trackedObject.lastPosition ?: trackedObject.centroid, trackedObject.centroid)
                     disappeared[objectId] = 0
+
+                    // Send data of tracked object to server
+                    val deviceId = "12345"  // Replace later with dynamic id
+                    val timestamp = System.currentTimeMillis().toString()
+                    val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
+                    val objectType = trackedObject.className
+                    val direction = trackedObject.direction
+
+                    sendTrackingLog(deviceId, timestamp, "$location | $objectType | $direction")
                 } else {
                     register(detectedBoxes[col], inputCentroids[col])
                 }
@@ -195,14 +204,6 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
             dy > DIRECTION_THRESHOLD -> "Up"
             else -> ""
         }
-    }
-
-    fun trackVehicle() {
-        val deviceId = "12345"
-        val timestamp = System.currentTimeMillis().toString()
-        val location = "37.7749,-122.4194" // Example: San Francisco
-
-        sendTrackingLog(deviceId, timestamp, location)
     }
 
     companion object {

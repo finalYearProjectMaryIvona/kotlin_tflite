@@ -70,7 +70,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Send a mock log to the backend
         sendTrackingLog(
-            deviceId = "12345",
+            deviceId = "12345testMock data",
             timestamp = System.currentTimeMillis().toString(),
             location = "37.7749,-122.4194"  // Example: San Franciscooo
         )
