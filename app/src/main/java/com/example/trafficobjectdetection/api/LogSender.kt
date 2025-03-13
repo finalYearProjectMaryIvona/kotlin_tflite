@@ -5,8 +5,8 @@ import retrofit2.Callback
 import retrofit2.Response
 
 // Function to send logs from anywhere in the app
-fun sendTrackingLog(deviceId: String, timestamp: String, location: String) {
-    val logData = LogData(deviceId, timestamp, location)
+fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String) {
+    val logData = LogData(deviceId, timestamp, location, objectType, direction)
     val call = RetrofitClient.instance.sendLog(logData)
 
     call.enqueue(object : Callback<ResponseData> {

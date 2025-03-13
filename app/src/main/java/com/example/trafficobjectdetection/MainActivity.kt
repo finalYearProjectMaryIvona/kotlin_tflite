@@ -69,11 +69,11 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         setContentView(binding.root)
 
         // Send a mock log to the backend
-        sendTrackingLog(
-            deviceId = "12345testMock data",
-            timestamp = System.currentTimeMillis().toString(),
-            location = "37.7749,-122.4194"  // Example: San Franciscooo
-        )
+//        sendTrackingLog(
+//            deviceId = "Mock data",
+//            timestamp = System.currentTimeMillis().toString(),
+//            location = "37.7749,-122.4194"  // Example: San Francisco
+//        )
 
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()

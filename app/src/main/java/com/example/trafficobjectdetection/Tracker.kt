@@ -2,11 +2,17 @@ package com.example.trafficobjectdetection
 
 import kotlin.math.sqrt
 import com.example.trafficobjectdetection.api.sendTrackingLog
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
     private var nextObjectId = 1
     private val objects = LinkedHashMap<Int, TrackedObject>()
     private val disappeared = LinkedHashMap<Int, Int>()
+
+    // Store objects that were already sent to server, store deviceIds in set
+    private val loggedObjects = mutableSetOf<Int>()
 
     // Track last assigned ID for each class type
     private val idRegistry = mutableMapOf<String, Int>()
@@ -28,6 +34,8 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                 disappeared[objectId] = disappeared[objectId]!! + 1
                 if (disappeared[objectId]!! > maxDisappeared) {
                     deregister(objectId)
+                    // Reset tracking when object leaves screen
+                    // loggedObjects.remove(objectId)
                 }
             }
             // If no objects remain, notify the detectorListener to clear UI
@@ -91,17 +99,25 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                     trackedObject.lastPosition = trackedObject.centroid
                     trackedObject.centroid = inputCentroids[col]
                     trackedObject.boundingBox = detectedBoxes[col]
-                    trackedObject.direction = calculateDirection(trackedObject.lastPosition ?: trackedObject.centroid, trackedObject.centroid)
+                    trackedObject.direction = calculateDirection(
+                        trackedObject.lastPosition ?: trackedObject.centroid,
+                        trackedObject.centroid
+                    )
                     disappeared[objectId] = 0
 
-                    // Send data of tracked object to server
-                    val deviceId = "12345"  // Replace later with dynamic id
-                    val timestamp = System.currentTimeMillis().toString()
-                    val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
-                    val objectType = trackedObject.className
-                    val direction = trackedObject.direction
+                    // Send data of tracked object to server only if deviceId has not been seen already
+                    if (!loggedObjects.contains(trackedObject.id)) {
+                        val deviceId = trackedObject.id.toString()
+                        val timestamp = getCurrentTime()
+                        val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
+                        val objectType = trackedObject.className
+                        val direction = trackedObject.direction
 
-                    sendTrackingLog(deviceId, timestamp, "$location | $objectType | $direction")
+                        sendTrackingLog(deviceId, timestamp, location, objectType, direction)
+                        
+                        // Add deviceId into loggedObjects
+                        loggedObjects.add(trackedObject.id)
+                    }
                 } else {
                     register(detectedBoxes[col], inputCentroids[col])
                 }
@@ -131,6 +147,12 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                 clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
             )
         }
+    }
+
+    // Get current time
+    private fun getCurrentTime(): String {
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        return dateFormat.format(Date())
     }
 
     private fun register(boundingBox: BoundingBox, centroid: Pair<Float, Float>) {
