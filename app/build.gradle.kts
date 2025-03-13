@@ -104,10 +104,13 @@ dependencies {
     androidTestImplementation ("androidx.test:rules:1.5.0")
 
 
-// Instrumentation Testing (MockK for Android)
+    // Instrumentation Testing (MockK for Android)
     androidTestImplementation ("io.mockk:mockk-android:1.13.5")
 
-
+    // For Retrofit
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.9.3")
 
 
 }

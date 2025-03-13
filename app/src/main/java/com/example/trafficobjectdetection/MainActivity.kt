@@ -23,6 +23,8 @@ import com.example.trafficobjectdetection.databinding.ActivityMainBinding
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+import com.example.trafficobjectdetection.api.sendTrackingLog
+
 // MainActivity handles camera initialization, image analysis, and object detection
 class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
@@ -65,6 +67,13 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Send a mock log to the backend
+        sendTrackingLog(
+            deviceId = "12345",
+            timestamp = System.currentTimeMillis().toString(),
+            location = "37.7749,-122.4194"  // Example: San Franciscooo
+        )
 
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()

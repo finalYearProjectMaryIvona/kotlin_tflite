@@ -1,6 +1,7 @@
 package com.example.trafficobjectdetection
 
 import kotlin.math.sqrt
+import com.example.trafficobjectdetection.api.sendTrackingLog
 
 class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
     private var nextObjectId = 1
@@ -194,6 +195,14 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
             dy > DIRECTION_THRESHOLD -> "Up"
             else -> ""
         }
+    }
+
+    fun trackVehicle() {
+        val deviceId = "12345"
+        val timestamp = System.currentTimeMillis().toString()
+        val location = "37.7749,-122.4194" // Example: San Francisco
+
+        sendTrackingLog(deviceId, timestamp, location)
     }
 
     companion object {
