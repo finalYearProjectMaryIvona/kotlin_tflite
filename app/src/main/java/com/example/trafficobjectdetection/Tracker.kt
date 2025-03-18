@@ -1,151 +1,154 @@
 package com.example.trafficobjectdetection
 
-import kotlin.math.sqrt
 import com.example.trafficobjectdetection.api.sendTrackingLog
 import java.text.SimpleDateFormat
+import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import kotlin.math.sqrt
 
 class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
     private var nextObjectId = 1
-    private val objects = LinkedHashMap<Int, TrackedObject>()
-    private val disappeared = LinkedHashMap<Int, Int>()
+    private val objects = Collections.synchronizedMap(LinkedHashMap<Int, TrackedObject>())
+    private val disappeared = Collections.synchronizedMap(LinkedHashMap<Int, Int>())
 
     // Store objects that were already sent to server, store deviceIds in set
-    private val loggedObjects = mutableSetOf<Int>()
+    private val loggedObjects = Collections.synchronizedSet(mutableSetOf<Int>())
 
     // Track last assigned ID for each class type
-    private val idRegistry = mutableMapOf<String, Int>()
+    private val idRegistry = Collections.synchronizedMap(mutableMapOf<String, Int>())
 
     data class TrackedObject(
         val id: Int,  // Add unique ID for each tracked object
-        var centroid: Pair<Float, Float>, // Center of the bounding box
-        var boundingBox: BoundingBox,
+        @Volatile var centroid: Pair<Float, Float>, // Center of the bounding box
+        @Volatile var boundingBox: BoundingBox,
         val className: String, // Object class ("Car", "Person", ...)
-        var direction: String = "", // Direction of object
-        var lastPosition: Pair<Float, Float>? = null // Last known position for tracking direction
+        @Volatile var direction: String = "", // Direction of object
+        @Volatile var lastPosition: Pair<Float, Float>? = null // Last known position for tracking direction
     )
 
     fun update(detectedBoxes: List<BoundingBox>): List<BoundingBox> {
-        // Handle case when no detections are present
-        if (detectedBoxes.isEmpty()) {
-            val objectIds = ArrayList(disappeared.keys)
-            for (objectId in objectIds) {
-                disappeared[objectId] = disappeared[objectId]!! + 1
-                if (disappeared[objectId]!! > maxDisappeared) {
-                    deregister(objectId)
-                    // Reset tracking when object leaves screen
-                    // loggedObjects.remove(objectId)
+        synchronized(this) {
+            // Handle case when no detections are present
+            if (detectedBoxes.isEmpty()) {
+                val objectIds = ArrayList(disappeared.keys)
+                for (objectId in objectIds) {
+                    disappeared[objectId] = disappeared[objectId]!! + 1
+                    if (disappeared[objectId]!! > maxDisappeared) {
+                        deregister(objectId)
+                        // Reset tracking when object leaves screen
+                        // loggedObjects.remove(objectId)
+                    }
+                }
+                // If no objects remain, notify the detectorListener to clear UI
+                if (objects.isEmpty()) listener.onTrackingCleared()
+
+                return objects.map { (_, tracked) ->
+                    tracked.boundingBox.copy(
+                        clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
+                    )
                 }
             }
-            // If no objects remain, notify the detectorListener to clear UI
-            if (objects.isEmpty()) listener.onTrackingCleared()
+
+            // Calculate centroids for current detections
+            val inputCentroids = detectedBoxes.map { box ->
+                Pair((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2)
+            }
+
+            // Register new objects if we're not tracking any yet
+            if (objects.isEmpty()) {
+                for (i in detectedBoxes.indices) {
+                    register(detectedBoxes[i], inputCentroids[i])
+                }
+            } else {
+                // Match existing objects with new detections
+                val objectIds = ArrayList(objects.keys)
+                val objectCentroids = objects.values.map { it.centroid }
+
+                // Calculate distances between existing objects and new detections
+                val distances = calculateDistanceMatrix(objectCentroids, inputCentroids)
+
+                // Find best matches using minimum distances
+                val usedRows = mutableSetOf<Int>()
+                val usedCols = mutableSetOf<Int>()
+                // Sort distances and match closest pairs
+                val pairs = mutableListOf<Pair<Int, Int>>()
+
+                val sortedDistances = distances.flatMapIndexed { row, cols ->
+                    cols.mapIndexed { col, dist -> Triple(row, col, dist) }
+                }.sortedBy { it.third }
+
+                for (dist in sortedDistances) {
+                    val row = dist.first
+                    val col = dist.second
+
+                    if (!usedRows.contains(row) && !usedCols.contains(col) &&
+                        dist.third < MAX_DISTANCE_THRESHOLD
+                    ) {
+                        pairs.add(Pair(row, col))
+                        usedRows.add(row)
+                        usedCols.add(col)
+                    }
+                }
+
+                // Update matched objects
+                for ((row, col) in pairs) {
+                    val objectId = objectIds[row]
+                    val trackedObject = objects[objectId]
+
+                    // Keep same ID if same class
+                    if (trackedObject != null && trackedObject.className == detectedBoxes[col].clsName) {
+                        trackedObject.lastPosition = trackedObject.centroid
+                        trackedObject.centroid = inputCentroids[col]
+                        trackedObject.boundingBox = detectedBoxes[col]
+                        trackedObject.direction = calculateDirection(
+                            trackedObject.lastPosition ?: trackedObject.centroid,
+                            trackedObject.centroid
+                        )
+                        disappeared[objectId] = 0
+
+                        // Send data of tracked object to server only if deviceId has not been seen already
+                        if (!loggedObjects.contains(trackedObject.id)) {
+                            val deviceId = trackedObject.id.toString()
+                            val timestamp = getCurrentTime()
+                            val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
+                            val objectType = trackedObject.className
+                            val direction = trackedObject.direction
+
+                            sendTrackingLog(deviceId, timestamp, location, objectType, direction)
+
+                            // Add deviceId into loggedObjects
+                            loggedObjects.add(trackedObject.id)
+                        }
+                    } else {
+                        register(detectedBoxes[col], inputCentroids[col])
+                    }
+                }
+
+                // Handle unmatched objects and detections
+                val unusedRows = (0 until objectIds.size).filter { !usedRows.contains(it) }
+                val unusedCols = (0 until inputCentroids.size).filter { !usedCols.contains(it) }
+
+                // Mark unmatched objects as disappeared
+                for (row in unusedRows) {
+                    val objectId = objectIds[row]
+                    disappeared[objectId] = disappeared[objectId]!! + 1
+                    if (disappeared[objectId]!! > maxDisappeared) {
+                        deregister(objectId)
+                    }
+                }
+
+                // Register new objects for unmatched detections
+                for (col in unusedCols) {
+                    register(detectedBoxes[col], inputCentroids[col])
+                }
+            }
 
             return objects.map { (_, tracked) ->
                 tracked.boundingBox.copy(
                     clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
                 )
             }
-        }
-
-        // Calculate centroids for current detections
-        val inputCentroids = detectedBoxes.map { box ->
-            Pair((box.x1 + box.x2) / 2, (box.y1 + box.y2) / 2)
-        }
-
-        // Register new objects if we're not tracking any yet
-        if (objects.isEmpty()) {
-            for (i in detectedBoxes.indices) {
-                register(detectedBoxes[i], inputCentroids[i])
-            }
-        } else {
-            // Match existing objects with new detections
-            val objectIds = ArrayList(objects.keys)
-            val objectCentroids = objects.values.map { it.centroid }
-
-            // Calculate distances between existing objects and new detections
-            val distances = calculateDistanceMatrix(objectCentroids, inputCentroids)
-
-            // Find best matches using minimum distances
-            val usedRows = mutableSetOf<Int>()
-            val usedCols = mutableSetOf<Int>()
-            // Sort distances and match closest pairs
-            val pairs = mutableListOf<Pair<Int, Int>>()
-
-            val sortedDistances = distances.flatMapIndexed { row, cols ->
-                cols.mapIndexed { col, dist -> Triple(row, col, dist) }
-            }.sortedBy { it.third }
-
-            for (dist in sortedDistances) {
-                val row = dist.first
-                val col = dist.second
-
-                if (!usedRows.contains(row) && !usedCols.contains(col) &&
-                    dist.third < MAX_DISTANCE_THRESHOLD
-                ) {
-                    pairs.add(Pair(row, col))
-                    usedRows.add(row)
-                    usedCols.add(col)
-                }
-            }
-
-            // Update matched objects
-            for ((row, col) in pairs) {
-                val objectId = objectIds[row]
-                val trackedObject = objects[objectId]!!
-
-                // Keep same ID if same class
-                if (trackedObject.className == detectedBoxes[col].clsName) {
-                    trackedObject.lastPosition = trackedObject.centroid
-                    trackedObject.centroid = inputCentroids[col]
-                    trackedObject.boundingBox = detectedBoxes[col]
-                    trackedObject.direction = calculateDirection(
-                        trackedObject.lastPosition ?: trackedObject.centroid,
-                        trackedObject.centroid
-                    )
-                    disappeared[objectId] = 0
-
-                    // Send data of tracked object to server only if deviceId has not been seen already
-                    if (!loggedObjects.contains(trackedObject.id)) {
-                        val deviceId = trackedObject.id.toString()
-                        val timestamp = getCurrentTime()
-                        val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
-                        val objectType = trackedObject.className
-                        val direction = trackedObject.direction
-
-                        sendTrackingLog(deviceId, timestamp, location, objectType, direction)
-                        
-                        // Add deviceId into loggedObjects
-                        loggedObjects.add(trackedObject.id)
-                    }
-                } else {
-                    register(detectedBoxes[col], inputCentroids[col])
-                }
-            }
-
-            // Handle unmatched objects and detections
-            val unusedRows = (0 until objectIds.size).filter { !usedRows.contains(it) }
-            val unusedCols = (0 until inputCentroids.size).filter { !usedCols.contains(it) }
-
-            // Mark unmatched objects as disappeared
-            for (row in unusedRows) {
-                val objectId = objectIds[row]
-                disappeared[objectId] = disappeared[objectId]!! + 1
-                if (disappeared[objectId]!! > maxDisappeared) {
-                    deregister(objectId)
-                }
-            }
-
-            // Register new objects for unmatched detections
-            for (col in unusedCols) {
-                register(detectedBoxes[col], inputCentroids[col])
-            }
-        }
-
-        return objects.map { (_, tracked) ->
-            tracked.boundingBox.copy(
-                clsName = "${tracked.className} #${tracked.id}\n${tracked.direction}"
-            )
         }
     }
 

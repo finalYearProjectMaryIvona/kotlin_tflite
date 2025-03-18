@@ -19,9 +19,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.TrafficObjectDetection"
         android:usesCleartextTraffic="true"
+        android:largeHeap="true"
         tools:targetApi="31">
         <activity
-            android:name=".MainActivity"
+            android:name=".LauncherActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.TrafficObjectDetection">
@@ -31,6 +32,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".VideoActivity"
+            android:exported="false" />
     </application>
 
 </manifest>
