@@ -1,11 +1,16 @@
 package com.example.trafficobjectdetection
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -19,11 +24,14 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.trafficobjectdetection.Constants.LABELS_PATH
 import com.example.trafficobjectdetection.Constants.MODEL_PATH
+import com.example.trafficobjectdetection.api.ApiHelper
 import com.example.trafficobjectdetection.databinding.ActivityMainBinding
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-
-import com.example.trafficobjectdetection.api.sendTrackingLog
 
 // MainActivity handles camera initialization, image analysis, and object detection
 class MainActivity : AppCompatActivity(), Detector.DetectorListener {
@@ -43,6 +51,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     // Object detection model
     private var detector: Detector? = null
 
+    // Tracker for object detection
     private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
         override fun onTrackingCleared() {
             runOnUiThread {
@@ -52,28 +61,56 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     })
 
     // Vehicle tracker for logging exit events
-    private val vehicleTracker = VehicleTracker(object : ServerReporter {
-        override fun sendData(data: Map<String, Any>) {
-            // For now, just log the data
-            // In a real implementation, this would send to a database
-            Log.d("VehicleDatabase", data.toString())
-        }
-    })
+    private lateinit var vehicleTracker: VehicleTracker
 
     // Background thread for executing camera tasks
     private lateinit var cameraExecutor: ExecutorService
+
+    // Permission request for saving images in test mode
+    private val storagePermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            true // Android 10+ uses scoped storage, no explicit permission needed
+        } else {
+            permissions[Manifest.permission.WRITE_EXTERNAL_STORAGE] == true
+        }
+
+        if (storageGranted) {
+            toast("Storage permission granted, test mode enabled")
+            vehicleTracker.testMode = true
+            binding.switchTestMode.isChecked = true
+            createTestDirectory()
+        } else {
+            toast("Storage permission denied. Images will be saved to app internal storage.")
+            vehicleTracker.testMode = true // Still enable test mode, but use internal storage
+            binding.switchTestMode.isChecked = true
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Send a mock log to the backend
-//        sendTrackingLog(
-//            deviceId = "Mock data",
-//            timestamp = System.currentTimeMillis().toString(),
-//            location = "37.7749,-122.4194"  // Example: San Francisco
-//        )
+        // Initialize the Vehicle Tracker with context for test mode
+        vehicleTracker = VehicleTracker(
+            serverReporter = object : ServerReporter {
+                override fun sendData(data: Map<String, Any>) {
+                    // In normal mode, this would send to the database
+                    if (!vehicleTracker.testMode) {
+                        if (data.containsKey("image_data")) {
+                            Log.d("VehicleDatabase", "Sending data with image to database")
+                            uploadVehicleDataWithImage(data)
+                        } else {
+                            Log.d("VehicleDatabase", "Sending data to database: ${data.keys}")
+                            uploadVehicleData(data)
+                        }
+                    }
+                }
+            },
+            context = this // Pass context for test mode
+        )
 
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()
@@ -97,6 +134,136 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Setup UI listeners
         bindListeners()
+
+        // Setup test mode switch
+        setupTestModeSwitch()
+    }
+
+    // Create test directory for saving images
+    private fun createTestDirectory() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            try {
+                val directory = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "TrafficDetection"
+                )
+
+                if (!directory.exists()) {
+                    val success = directory.mkdirs()
+                    if (success) {
+                        Log.d("MainActivity", "Successfully created directory: ${directory.absolutePath}")
+                    } else {
+                        Log.e("MainActivity", "Failed to create directory: ${directory.absolutePath}")
+                    }
+                } else {
+                    Log.d("MainActivity", "Directory already exists: ${directory.absolutePath}")
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error creating directory: ${e.message}")
+            }
+        }
+
+        // Also create a directory in app's internal storage as fallback
+        try {
+            val internalDir = File(filesDir, "TrafficDetection")
+            if (!internalDir.exists()) {
+                internalDir.mkdirs()
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error creating internal directory: ${e.message}")
+        }
+
+        // Test write access by writing a small test file
+        testWriteAccess()
+    }
+
+    // Test if we can write files
+    private fun testWriteAccess() {
+        try {
+            // Test internal storage first (should always work)
+            val internalFile = File(filesDir, "test_write.txt")
+            FileOutputStream(internalFile).use { it.write("test".toByteArray()) }
+            Log.d("MainActivity", "Successfully wrote to internal storage")
+
+            // For Android 10+, test MediaStore API
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "test_write.txt")
+                    put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOCUMENTS)
+                }
+
+                val uri = contentResolver.insert(MediaStore.Files.getContentUri("external"), contentValues)
+                uri?.let { outputUri ->
+                    contentResolver.openOutputStream(outputUri)?.use {
+                        it.write("test".toByteArray())
+                    }
+                    // Delete the test file
+                    contentResolver.delete(outputUri, null, null)
+                    Log.d("MainActivity", "Successfully wrote to MediaStore")
+                }
+            } else {
+                // For older versions, test direct file access
+                val directory = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val file = File(directory, "test_write.txt")
+                FileOutputStream(file).use { it.write("test".toByteArray()) }
+                file.delete()
+                Log.d("MainActivity", "Successfully wrote to external storage")
+            }
+        } catch (e: IOException) {
+            Log.e("MainActivity", "Write test failed: ${e.message}")
+            toast("Warning: Write access test failed. Images may not save correctly.")
+        }
+    }
+
+    // Setup the test mode switch
+    private fun setupTestModeSwitch() {
+        // Make the test mode switch visible
+        binding.switchTestMode.visibility = View.VISIBLE
+        binding.testModeLabel.visibility = View.VISIBLE
+
+        binding.switchTestMode.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                // Enable test mode - check for storage permission first
+                if (hasStoragePermission()) {
+                    vehicleTracker.testMode = true
+                    toast("Test mode enabled - cup/bus images will be saved")
+                    createTestDirectory()
+                } else {
+                    // Request storage permission
+                    requestStoragePermission()
+                }
+            } else {
+                // Disable test mode
+                vehicleTracker.testMode = false
+                toast("Test mode disabled")
+            }
+        }
+    }
+
+    // Check if we have storage permission
+    private fun hasStoragePermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+ uses scoped storage
+            true
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    // Request storage permission
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+ uses scoped storage, no permission needed
+            vehicleTracker.testMode = true
+            binding.switchTestMode.isChecked = true
+            createTestDirectory()
+        } else {
+            storagePermissionRequest.launch(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE))
+        }
     }
 
     // Function to handle UI interactions
@@ -188,6 +355,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 true
             )
 
+            // Pass the current frame to the vehicle tracker for potential capture
+            vehicleTracker.setCurrentFrame(rotatedBitmap)
+
             // Run object detection on the processed image
             detector?.detect(rotatedBitmap)
         }
@@ -208,6 +378,55 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             preview?.surfaceProvider = binding.viewFinder.surfaceProvider
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
+        }
+    }
+
+    /**
+     * Upload vehicle data to your database
+     */
+    private fun uploadVehicleData(data: Map<String, Any>) {
+        // Execute in background thread
+        cameraExecutor.execute {
+            try {
+                // Example implementation - replace with your actual database API call
+                Log.d("Database", "Would upload vehicle data: ${JSONObject(data)}")
+
+                // Here's where you'd implement your actual database upload
+                // For example with Firebase:
+                // val databaseRef = FirebaseDatabase.getInstance().reference
+                // databaseRef.child("vehicles").push().setValue(data)
+
+                // Or with a custom API:
+                val deviceId = data["vehicle_id"]?.toString() ?: ""
+                val timestamp = data["exit_timestamp"]?.toString() ?: ""
+                val location = "${data["exit_position_x"]},${data["exit_position_y"]}"
+                val objectType = data["vehicle_type"]?.toString() ?: ""
+                val direction = data["direction"]?.toString() ?: ""
+
+                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction)
+
+            } catch (e: Exception) {
+                Log.e("Database", "Error uploading vehicle data: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Upload vehicle data with image to your database
+     */
+    private fun uploadVehicleDataWithImage(data: Map<String, Any>) {
+        // Execute in background thread
+        cameraExecutor.execute {
+            try {
+                Log.d("Database", "Would upload vehicle data with image")
+
+                // Here you'd implement your actual database upload with image
+                // For example, using our ApiHelper:
+                ApiHelper.sendVehicleDataWithImage(data, cacheDir)
+
+            } catch (e: Exception) {
+                Log.e("Database", "Error uploading vehicle data with image: ${e.message}")
+            }
         }
     }
 
@@ -251,7 +470,14 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     companion object {
         private const val TAG = "Camera" // Log tag
         private const val REQUEST_CODE_PERMISSIONS = 10 // Permission request code
-        private val REQUIRED_PERMISSIONS = mutableListOf(Manifest.permission.CAMERA).toTypedArray()
+        private val REQUIRED_PERMISSIONS = mutableListOf(
+            Manifest.permission.CAMERA
+        ).apply {
+            // Add storage permission for Android 9 and below
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }.toTypedArray()
     }
 
     // Callback function when no object is detected

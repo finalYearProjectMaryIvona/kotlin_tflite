@@ -24,7 +24,8 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
         @Volatile var boundingBox: BoundingBox,
         val className: String, // Object class ("Car", "Person", ...)
         @Volatile var direction: String = "", // Direction of object
-        @Volatile var lastPosition: Pair<Float, Float>? = null // Last known position for tracking direction
+        @Volatile var lastPosition: Pair<Float, Float>? = null, // Last known position for tracking direction
+        @Volatile var velocity: Pair<Float, Float> = Pair(0f, 0f) // Simple velocity tracking
     )
 
     fun update(detectedBoxes: List<BoundingBox>): List<BoundingBox> {
@@ -71,6 +72,7 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                 // Find best matches using minimum distances
                 val usedRows = mutableSetOf<Int>()
                 val usedCols = mutableSetOf<Int>()
+
                 // Sort distances and match closest pairs
                 val pairs = mutableListOf<Pair<Int, Int>>()
 
@@ -78,12 +80,15 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                     cols.mapIndexed { col, dist -> Triple(row, col, dist) }
                 }.sortedBy { it.third }
 
+                // Use a more generous distance threshold
+                val maxDistThreshold = MAX_DISTANCE_THRESHOLD * 1.5f
+
                 for (dist in sortedDistances) {
                     val row = dist.first
                     val col = dist.second
 
                     if (!usedRows.contains(row) && !usedCols.contains(col) &&
-                        dist.third < MAX_DISTANCE_THRESHOLD
+                        dist.third < maxDistThreshold
                     ) {
                         pairs.add(Pair(row, col))
                         usedRows.add(row)
@@ -98,8 +103,24 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
 
                     // Keep same ID if same class
                     if (trackedObject != null && trackedObject.className == detectedBoxes[col].clsName) {
+                        // Store last position to calculate velocity
                         trackedObject.lastPosition = trackedObject.centroid
-                        trackedObject.centroid = inputCentroids[col]
+                        val newCentroid = inputCentroids[col]
+
+                        // Calculate velocity (simple but effective)
+                        if (trackedObject.lastPosition != null) {
+                            val lastPos = trackedObject.lastPosition!!
+                            val dx = newCentroid.first - lastPos.first
+                            val dy = newCentroid.second - lastPos.second
+
+                            // Update velocity with smoothing (80% new, 20% old velocity)
+                            trackedObject.velocity = Pair(
+                                0.8f * dx + 0.2f * trackedObject.velocity.first,
+                                0.8f * dy + 0.2f * trackedObject.velocity.second
+                            )
+                        }
+
+                        trackedObject.centroid = newCentroid
                         trackedObject.boundingBox = detectedBoxes[col]
                         trackedObject.direction = calculateDirection(
                             trackedObject.lastPosition ?: trackedObject.centroid,
@@ -129,9 +150,35 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                 val unusedRows = (0 until objectIds.size).filter { !usedRows.contains(it) }
                 val unusedCols = (0 until inputCentroids.size).filter { !usedCols.contains(it) }
 
-                // Mark unmatched objects as disappeared
+                // For unmatched objects, apply velocity to keep the box moving in the expected direction
+                // This is key to preventing the "lag" effect
                 for (row in unusedRows) {
                     val objectId = objectIds[row]
+                    val trackedObj = objects[objectId]
+
+                    // Apply velocity to update position - this keeps the box moving even when not matched
+                    if (trackedObj != null && (trackedObj.velocity.first != 0f || trackedObj.velocity.second != 0f)) {
+                        val newX = trackedObj.centroid.first + trackedObj.velocity.first
+                        val newY = trackedObj.centroid.second + trackedObj.velocity.second
+
+                        // Update the centroid
+                        trackedObj.centroid = Pair(newX, newY)
+
+                        // Update the bounding box to match the new centroid
+                        val width = trackedObj.boundingBox.w
+                        val height = trackedObj.boundingBox.h
+
+                        trackedObj.boundingBox = trackedObj.boundingBox.copy(
+                            x1 = newX - width/2,
+                            y1 = newY - height/2,
+                            x2 = newX + width/2,
+                            y2 = newY + height/2,
+                            cx = newX,
+                            cy = newY
+                        )
+                    }
+
+                    // Increment disappeared counter
                     disappeared[objectId] = disappeared[objectId]!! + 1
                     if (disappeared[objectId]!! > maxDisappeared) {
                         deregister(objectId)
@@ -196,19 +243,6 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
         val dx = p1.first - p2.first
         val dy = p1.second - p2.second
         return sqrt(dx * dx + dy * dy)
-    }
-
-    private fun calculateIoU(box1: BoundingBox, box2: BoundingBox): Float {
-        val x1 = maxOf(box1.x1, box2.x1)
-        val y1 = maxOf(box1.y1, box2.y1)
-        val x2 = minOf(box1.x2, box2.x2)
-        val y2 = minOf(box1.y2, box2.y2)
-
-        val intersectionArea = maxOf(0F, x2 - x1) * maxOf(0F, y2 - y1)
-        val box1Area = box1.w * box1.h
-        val box2Area = box2.w * box2.h
-
-        return intersectionArea / (box1Area + box2Area - intersectionArea)
     }
 
     private fun calculateDirection(

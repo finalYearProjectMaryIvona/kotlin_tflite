@@ -1,16 +1,35 @@
 package com.example.trafficobjectdetection
 
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaScannerConnection
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
 import android.util.Log
+import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * VehicleTracker - Tracks vehicles across frames and reports entry/exit events
- * with corrected coordinate system for proper direction tracking.
+ * with image capture for buses and cups (for testing).
  */
-class VehicleTracker(private val serverReporter: ServerReporter? = null) {
+class VehicleTracker(
+    private val serverReporter: ServerReporter? = null,
+    private val context: Context? = null
+) {
 
     // Store tracking data for vehicles that have been detected
     private val vehicles = ConcurrentHashMap<String, VehicleData>()
@@ -18,11 +37,23 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
     // List of vehicle-type classes to track
     private val vehicleClasses = setOf("car", "truck", "bus", "motorcycle", "bicycle", "cup")
 
+    // Classes that should have images captured
+    private val captureImageClasses = setOf("bus")
+
     // Coroutine scope for async operations
     private val scope = CoroutineScope(Dispatchers.IO)
 
     // Track whether this tracker has been initialized
     private var isInitialized = false
+
+    // Current frame bitmap for capturing
+    private var currentFrameBitmap: Bitmap? = null
+
+    // Test mode flag - when true, images will be saved locally
+    var testMode = false
+
+    // Session ID for grouping tracked objects
+    private val sessionId = UUID.randomUUID().toString()
 
     /**
      * Initialize the tracker if not already initialized
@@ -30,8 +61,15 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
     fun initialize() {
         if (!isInitialized) {
             isInitialized = true
-            Log.d("VehicleTracker", "Vehicle tracker initialized")
+            Log.d("VehicleTracker", "Vehicle tracker initialized with session ID: $sessionId")
         }
+    }
+
+    /**
+     * Set the current frame bitmap that can be captured when vehicles are detected
+     */
+    fun setCurrentFrame(bitmap: Bitmap) {
+        currentFrameBitmap = bitmap
     }
 
     /**
@@ -67,6 +105,19 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
                         confidence = box.cnf
                     )
 
+                    // Capture image if this is a class we want to photograph (e.g., bus or cup)
+                    if (className in captureImageClasses && currentFrameBitmap != null) {
+                        // Capture the whole frame or just crop to the bounding box
+                        vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
+
+                        // In test mode, save the image locally
+                        if (testMode && context != null) {
+                            saveImageForTesting(vehicleData, "entry")
+                        }
+
+                        Log.d("VehicleTracker", "Captured image for $className ID: $id")
+                    }
+
                     vehicles[vehicleKey] = vehicleData
                     reportVehicleEntry(vehicleData)
                 } else {
@@ -82,7 +133,7 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
                         vehicleData.exitTime = System.currentTimeMillis()
                         vehicleData.exitReported = true
 
-                        // Report vehicle exit
+                        // Report vehicle exit with image if available
                         reportVehicleExit(vehicleData)
                     }
                 }
@@ -91,6 +142,163 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
 
         // Clean up vehicles that haven't been updated in a while
         cleanupStaleVehicles()
+    }
+
+    /**
+     * Save captured image to local storage for testing
+     * Uses proper Android 10+ scoped storage approach
+     */
+    private fun saveImageForTesting(vehicleData: VehicleData, event: String) {
+        if (vehicleData.capturedImage == null || context == null) return
+
+        scope.launch(Dispatchers.IO) {
+            try {
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val fileName = "${vehicleData.className}_${vehicleData.id}_${event}_$timestamp.jpg"
+                val bitmap = vehicleData.capturedImage!!
+
+                // Different ways to save images based on Android version
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Android 10+ (API 29+) - Use MediaStore API
+                    val contentValues = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/TrafficDetection")
+                    }
+
+                    val contentResolver = context.contentResolver
+                    val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+                    uri?.let { outputUri ->
+                        contentResolver.openOutputStream(outputUri)?.use { outputStream ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+                            showSavedToast(fileName)
+                            Log.d("VehicleTracker", "Successfully saved image to MediaStore: $fileName")
+                        }
+                    }
+                } else {
+                    // Before Android 10 - traditional file access
+                    val directory = File(
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                        "TrafficDetection"
+                    )
+
+                    // Create directory if it doesn't exist
+                    if (!directory.exists() && !directory.mkdirs()) {
+                        Log.e("VehicleTracker", "Failed to create directory: ${directory.absolutePath}")
+                        return@launch
+                    }
+
+                    val file = File(directory, fileName)
+                    try {
+                        FileOutputStream(file).use { outputStream ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
+                            outputStream.flush()
+                        }
+
+                        // Make image visible in gallery
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(file.toString()),
+                            null,
+                            null
+                        )
+
+                        showSavedToast(fileName)
+                        Log.d("VehicleTracker", "Successfully saved image to file: ${file.absolutePath}")
+                    } catch (e: Exception) {
+                        Log.e("VehicleTracker", "File output stream error: ${e.message}")
+                    }
+                }
+
+                // Alternative approach - save to app-specific files
+                saveToInternalStorage(bitmap, fileName)
+
+            } catch (e: Exception) {
+                Log.e("VehicleTracker", "Error saving test image: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /**
+     * Save to app-specific internal storage as a fallback
+     */
+    private fun saveToInternalStorage(bitmap: Bitmap, fileName: String) {
+        try {
+            context?.let { ctx ->
+                // Save to app's private files directory
+                val filesDir = ctx.filesDir
+                val imageFile = File(filesDir, fileName)
+
+                FileOutputStream(imageFile).use { fos ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+                    fos.flush()
+                }
+
+                Log.d("VehicleTracker", "Saved to internal storage: ${imageFile.absolutePath}")
+                showSavedToast("$fileName (internal)")
+            }
+        } catch (e: Exception) {
+            Log.e("VehicleTracker", "Failed to save to internal storage: ${e.message}")
+        }
+    }
+
+    /**
+     * Show a toast message on the main thread
+     */
+    private fun showSavedToast(fileName: String) {
+        context?.let { ctx ->
+            scope.launch(Dispatchers.Main) {
+                Toast.makeText(
+                    ctx,
+                    "Saved ${fileName}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Capture an image of the vehicle
+     * @param frameBitmap The full frame
+     * @param box The bounding box of the vehicle
+     * @return A cropped bitmap of the vehicle, or the full frame if cropping fails
+     */
+    private fun captureVehicleImage(frameBitmap: Bitmap, box: BoundingBox): Bitmap {
+        try {
+            // Convert normalized coordinates to pixel values
+            val frameWidth = frameBitmap.width
+            val frameHeight = frameBitmap.height
+
+            val x1 = (box.x1 * frameWidth).toInt().coerceIn(0, frameWidth - 1)
+            val y1 = (box.y1 * frameHeight).toInt().coerceIn(0, frameHeight - 1)
+            val x2 = (box.x2 * frameWidth).toInt().coerceIn(x1 + 1, frameWidth)
+            val y2 = (box.y2 * frameHeight).toInt().coerceIn(y1 + 1, frameHeight)
+
+            val width = x2 - x1
+            val height = y2 - y1
+
+            // Crop the image to the bounding box
+            val croppedBitmap = Bitmap.createBitmap(frameBitmap, x1, y1, width, height)
+            Log.d("VehicleTracker", "Successfully cropped image to ${width}x${height}")
+            return croppedBitmap
+        } catch (e: Exception) {
+            Log.e("VehicleTracker", "Failed to crop image: ${e.message}")
+            // Return a copy of the full frame if cropping fails
+            return frameBitmap.copy(frameBitmap.config ?: Bitmap.Config.ARGB_8888, true)
+        }
+    }
+
+    /**
+     * Convert bitmap to Base64 string for database storage
+     */
+    private fun bitmapToBase64(bitmap: Bitmap): String {
+        val outputStream = ByteArrayOutputStream()
+        // Compress to JPEG with 85% quality for better size/quality balance
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+        val byteArray = outputStream.toByteArray()
+        return Base64.encodeToString(byteArray, Base64.DEFAULT)
     }
 
     /**
@@ -108,8 +316,9 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
      * Report vehicle entry to server
      */
     private fun reportVehicleEntry(vehicleData: VehicleData) {
-        val entryData = mapOf(
+        val entryData = mutableMapOf(
             "event" to "entry",
+            "session_id" to sessionId,
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
             "timestamp" to vehicleData.entryTime,
@@ -118,11 +327,23 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
             "confidence" to vehicleData.confidence
         )
 
-        // Log the entry
-        Log.d("VehicleTracker", "ENTRY: $entryData")
+        // Add image data if available
+        vehicleData.capturedImage?.let { bitmap ->
+            // Only add if it's a class we want to capture
+            if (vehicleData.className in captureImageClasses) {
+                entryData["has_image"] = true
+                // Note: You might not want to send the actual image on entry
+                // to save bandwidth, just indicate that there is an image
+            }
+        }
 
-        // Send to server if reporter is available
-        serverReporter?.sendData(entryData)
+        // Log the entry details
+        Log.d("VehicleTracker", "ENTRY DATA: $entryData")
+
+        // Send to server if reporter is available and not in test mode
+        if (!testMode) {
+            serverReporter?.sendData(entryData)
+        }
     }
 
     /**
@@ -139,8 +360,9 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
         // Calculate direction based on entry and exit positions, with fixed orientation
         val direction = calculateDirectionFixed(vehicleData.entryPosition, exitPos)
 
-        val exitData = mapOf(
+        val exitData = mutableMapOf<String, Any>(
             "event" to "exit",
+            "session_id" to sessionId,
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
             "entry_timestamp" to vehicleData.entryTime,
@@ -154,12 +376,31 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
             "confidence" to vehicleData.confidence
         )
 
-        // Log the exit
-        Log.d("VehicleTracker", "EXIT: $exitData")
+        // In test mode, save the image if available
+        if (testMode && context != null && vehicleData.capturedImage != null) {
+            saveImageForTesting(vehicleData, "exit")
+        }
 
-        // Send to server asynchronously if reporter is available
-        scope.launch {
-            serverReporter?.sendData(exitData)
+        // Add image data if available and it's a class we want images for
+        if (vehicleData.className in captureImageClasses && vehicleData.capturedImage != null) {
+            // In normal mode, convert bitmap to Base64 string for database storage
+            if (!testMode) {
+                val imageBase64 = bitmapToBase64(vehicleData.capturedImage!!)
+                exitData["image_data"] = imageBase64
+            }
+            exitData["has_image"] = true
+
+            Log.d("VehicleTracker", "Added image data for ${vehicleData.className} ${vehicleData.id}")
+        }
+
+        // Log all the exit data
+        Log.d("VehicleTracker", "EXIT DATA: $exitData")
+
+        // Send to server asynchronously if reporter is available and not in test mode
+        if (!testMode) {
+            scope.launch {
+                serverReporter?.sendData(exitData)
+            }
         }
     }
 
@@ -212,6 +453,7 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
 
     /**
      * Data class to store vehicle tracking information
+     * Includes a captured image field
      */
     data class VehicleData(
         val id: String,
@@ -223,7 +465,8 @@ class VehicleTracker(private val serverReporter: ServerReporter? = null) {
         var exitTime: Long = 0,
         var lastUpdateTime: Long = entryTime,
         var confidence: Float = 0f,
-        var exitReported: Boolean = false
+        var exitReported: Boolean = false,
+        var capturedImage: Bitmap? = null  // Field to store the vehicle image
     )
 }
 
