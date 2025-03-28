@@ -99,12 +99,19 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 override fun sendData(data: Map<String, Any>) {
                     // In normal mode, this would send to the database
                     if (!vehicleTracker.testMode) {
-                        if (data.containsKey("image_data")) {
-                            Log.d("VehicleDatabase", "Sending data with image to database")
-                            uploadVehicleDataWithImage(data)
+                        // Create a copy with session ID if not already present
+                        val dataWithSessionId = data.toMutableMap().apply {
+                            if (!containsKey("session_id")) {
+                                put("session_id", vehicleTracker.getSessionId())
+                            }
+                        }
+
+                        if (dataWithSessionId.containsKey("image_data")) {
+                            Log.d("VehicleDatabase", "Sending data with image to database. Session ID: ${dataWithSessionId["session_id"]}")
+                            uploadVehicleDataWithImage(dataWithSessionId)
                         } else {
-                            Log.d("VehicleDatabase", "Sending data to database: ${data.keys}")
-                            uploadVehicleData(data)
+                            Log.d("VehicleDatabase", "Sending data to database: ${dataWithSessionId.keys}. Session ID: ${dataWithSessionId["session_id"]}")
+                            uploadVehicleData(dataWithSessionId)
                         }
                     }
                 }
@@ -124,6 +131,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Initialize the vehicle tracker
         vehicleTracker.initialize()
+
+        // Log the session ID when the activity starts
+        Log.d("MainActivity", "Initialized with session ID: ${vehicleTracker.getSessionId()}")
 
         // Check if the required permissions are granted, if yes, start the camera
         if (allPermissionsGranted()) {
@@ -402,8 +412,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 val location = "${data["exit_position_x"]},${data["exit_position_y"]}"
                 val objectType = data["vehicle_type"]?.toString() ?: ""
                 val direction = data["direction"]?.toString() ?: ""
+                val sessionId = data["session_id"]?.toString() ?: ""
 
-                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction)
+                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId)
 
             } catch (e: Exception) {
                 Log.e("Database", "Error uploading vehicle data: ${e.message}")

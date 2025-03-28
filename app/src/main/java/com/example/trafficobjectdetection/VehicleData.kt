@@ -468,6 +468,14 @@ class VehicleTracker(
         var exitReported: Boolean = false,
         var capturedImage: Bitmap? = null  // Field to store the vehicle image
     )
+    /**
+     * Get the current session ID
+     * This allows other components to access the session ID
+     * @return String containing the UUID for the current tracking session
+     */
+    fun getSessionId(): String {
+        return sessionId
+    }
 }
 
 /**

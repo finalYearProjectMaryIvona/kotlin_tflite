@@ -1,10 +1,12 @@
 package com.example.trafficobjectdetection
 
-import com.example.trafficobjectdetection.api.sendTrackingLog
+import android.util.Log
+import com.example.trafficobjectdetection.api.ApiHelper
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import kotlin.math.sqrt
 
 class Tracker(private val maxDisappeared: Int = 50, private val listener: TrackerListener) {
@@ -17,6 +19,9 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
 
     // Track last assigned ID for each class type
     private val idRegistry = Collections.synchronizedMap(mutableMapOf<String, Int>())
+
+    // Session ID for this tracking session
+    private val sessionId = UUID.randomUUID().toString()
 
     data class TrackedObject(
         val id: Int,  // Add unique ID for each tracked object
@@ -136,7 +141,13 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                             val objectType = trackedObject.className
                             val direction = trackedObject.direction
 
-                            sendTrackingLog(deviceId, timestamp, location, objectType, direction)
+                            // Use the ApiHelper directly to ensure it works
+                            try {
+                                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId)
+                                Log.d("Tracker", "Sent tracking log for $objectType ID:$deviceId, Session:$sessionId")
+                            } catch (e: Exception) {
+                                Log.e("Tracker", "Failed to send tracking log: ${e.message}", e)
+                            }
 
                             // Add deviceId into loggedObjects
                             loggedObjects.add(trackedObject.id)
@@ -197,6 +208,11 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                 )
             }
         }
+    }
+
+    // Get the current session ID
+    fun getSessionId(): String {
+        return sessionId
     }
 
     // Get current time

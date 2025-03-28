@@ -40,17 +40,28 @@ class VideoActivity : AppCompatActivity(), Detector.DetectorListener {
     })
 
     // Vehicle tracker with a server reporter to send tracking data
-    private val vehicleTracker = VehicleTracker(object : ServerReporter {
-        override fun sendData(data: Map<String, Any>) {
-            // Log tracking data
-            Log.d("VehicleDatabase", data.toString())
-        }
-    })
+    private lateinit var vehicleTracker: VehicleTracker
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityVideoBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        vehicleTracker = VehicleTracker(
+            context = this,
+            serverReporter = object : ServerReporter {
+                override fun sendData(data: Map<String, Any>) {
+                    val dataWithSessionId = data.toMutableMap().apply {
+                        if (!containsKey("session_id")) {
+                            put("session_id", vehicleTracker.getSessionId())
+                        }
+                    }
+
+                    Log.d("VehicleDatabase", dataWithSessionId.toString())
+                }
+            }
+        )
+
 
         // Initialise the processing executor for background tasks
         processingExecutor = Executors.newSingleThreadExecutor()
@@ -63,6 +74,10 @@ class VideoActivity : AppCompatActivity(), Detector.DetectorListener {
 
         //initialise vehicle tracker
         vehicleTracker.initialize()
+
+        // Log the session ID when the activity starts
+        Log.d("VideoActivity", "Initialized with session ID: ${vehicleTracker.getSessionId()}")
+
         //set up video player
         initVideoView()
         // Start processing when the button is clicked
