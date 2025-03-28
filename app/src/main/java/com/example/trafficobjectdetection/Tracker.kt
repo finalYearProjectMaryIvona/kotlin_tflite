@@ -134,7 +134,8 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                         disappeared[objectId] = 0
 
                         // Send data of tracked object to server only if deviceId has not been seen already
-                        if (!loggedObjects.contains(trackedObject.id)) {
+                        val isReportableBus = trackedObject.className.lowercase() == "bus"
+                        if (isReportableBus || !loggedObjects.contains(trackedObject.id)) {
                             val deviceId = trackedObject.id.toString()
                             val timestamp = getCurrentTime()
                             val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"  // position on screen, not yet gps
@@ -149,8 +150,10 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                                 Log.e("Tracker", "Failed to send tracking log: ${e.message}", e)
                             }
 
-                            // Add deviceId into loggedObjects
-                            loggedObjects.add(trackedObject.id)
+                            // Add deviceId into loggedObjects unless it's a bus
+                            if (!isReportableBus) {
+                                loggedObjects.add(trackedObject.id)
+                            }
                         }
                     } else {
                         register(detectedBoxes[col], inputCentroids[col])

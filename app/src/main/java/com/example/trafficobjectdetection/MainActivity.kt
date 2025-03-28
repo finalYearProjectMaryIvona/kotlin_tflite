@@ -93,6 +93,10 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Reset the global session ID for consistency
+        val sessionId = ApiHelper.resetSessionId()
+        Log.d("MainActivity", "Starting app with new session ID: $sessionId")
+
         // Initialize the Vehicle Tracker with context for test mode
         vehicleTracker = VehicleTracker(
             serverReporter = object : ServerReporter {

@@ -5,47 +5,36 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
- * Helper methods for sending data to your backend API
+ * Helper class for making API calls to the server
  */
 object ApiHelper {
-    // Global server IP address and port (REPLACE WITH YOUR ipv4)
-    private const val SERVER_ADDRESS = "PUTYOURIPV4HERE:5000"
+    private const val TAG = "ApiHelper"
 
-    // Your API endpoint for tracking data - update with your actual server address
-    // Your API endpoint for tracking data
-    private const val TRACKING_API_URL = "http://$SERVER_ADDRESS/tracking"
-
-    // Your API endpoint for uploading images
-    private const val UPLOAD_IMAGE_API_URL = "http://$SERVER_ADDRESS/upload-image"
-
-    // Endpoint for bus images
-    private const val BUS_IMAGE_API_URL = "http://$SERVER_ADDRESS/bus-image"
+    // Server URL (replace with your actual server IP address)
+    private const val BASE_URL = "http://PUTYOURIPV4HERE:5000"
 
     // Store a global session ID that can be accessed by any component
     private var globalSessionId: String = UUID.randomUUID().toString()
 
-    // OkHttpClient with longer timeouts for image uploads
+    // Configure OkHttp client with longer timeouts for image uploads
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
-
-    /**
-     * Get the server address (for checking connections)
-     */
-    fun getServerAddress(): String {
-        return SERVER_ADDRESS
-    }
 
     /**
      * Get the current global session ID
@@ -61,193 +50,359 @@ object ApiHelper {
      */
     fun resetSessionId(): String {
         globalSessionId = UUID.randomUUID().toString()
-        Log.d("ApiHelper", "Reset global session ID: $globalSessionId")
+        Log.d(TAG, "Reset global session ID: $globalSessionId")
         return globalSessionId
     }
 
     /**
-     * Send tracking log without image
+     * Format timestamp to YYYY-MM-DD HH:MM:SS format
      */
-    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String = "", direction: String = "", sessionId: String = "") {
-        // Use provided sessionId or fall back to global one
-        val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
-
-        val json = JSONObject().apply {
-            put("device_id", deviceId)
-            put("timestamp", timestamp)
-            put("location", location)
-            put("object_type", objectType)
-            put("direction", direction)
-            put("session_id", actualSessionId)
+    private fun formatTimestamp(timestamp: Any?): String {
+        if (timestamp == null) {
+            return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
         }
 
-        Log.d("API", "Preparing to send tracking log: ${json.toString()}")
-        Log.d("API", "Target URL: $TRACKING_API_URL")
+        // If it's already in the proper format, return it
+        if (timestamp is String && timestamp.matches(Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"))) {
+            return timestamp
+        }
 
-        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
-
-        val request = Request.Builder()
-            .url(TRACKING_API_URL)
-            .post(requestBody)
-            .build()
-
-        // Execute request in a background thread to avoid NetworkOnMainThreadException
-        Thread {
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("API", "Failed to send tracking log: ${response.code}")
-                        val errorBody = response.body?.string() ?: "Unknown error"
-                        Log.e("API", "Error response: $errorBody")
-                    } else {
-                        val responseBody = response.body?.string() ?: "Empty response"
-                        Log.d("API", "Successfully sent tracking log. Session ID: $actualSessionId, Response: $responseBody")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("API", "Error sending tracking log: ${e.message}", e)
-                e.printStackTrace()
+        // Format based on type
+        return try {
+            when (timestamp) {
+                is Long -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+                is String -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(
+                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).parse(timestamp) ?: Date()
+                )
+                else -> SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             }
-        }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error formatting timestamp: ${e.message}")
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        }
     }
 
     /**
-     * Send bus image to API
-     * This is a specialized method for sending bus images to be stored
-     * in the bus_images collection
+     * Ensure location data is properly formatted
      */
-    fun sendBusImage(imageBase64: String, timestamp: String, location: String = "", sessionId: String = "") {
-        // Use provided sessionId or fall back to global one
-        val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
-
-        val json = JSONObject().apply {
-            put("session_id", actualSessionId)
-            put("timestamp", timestamp)
-            put("location", location)
-            put("image_data", imageBase64)
+    private fun formatLocation(location: String?): String {
+        if (location.isNullOrEmpty() || location == "null,null" || location.contains("undefined")) {
+            return "0,0"
         }
-
-        Log.d("API", "Preparing to send bus image: session=${actualSessionId}, timestamp=${timestamp}")
-        Log.d("API", "Target URL: $BUS_IMAGE_API_URL")
-        Log.d("API", "Image data length: ${imageBase64.length}")
-
-        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
-
-        val request = Request.Builder()
-            .url(BUS_IMAGE_API_URL)
-            .post(requestBody)
-            .build()
-
-        // Execute request in a background thread to avoid NetworkOnMainThreadException
-        Thread {
-            try {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e("API", "Failed to send bus image: ${response.code}")
-                        val errorBody = response.body?.string() ?: "Unknown error"
-                        Log.e("API", "Error response: $errorBody")
-                    } else {
-                        val responseBody = response.body?.string() ?: "Empty response"
-                        Log.d("API", "Successfully sent bus image. Session ID: $actualSessionId, Response: $responseBody")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("API", "Error sending bus image: ${e.message}", e)
-                e.printStackTrace()
-            }
-        }.start()
+        return location
     }
 
     /**
-     * Send vehicle data with image to API
-     * Using explicit cast to fix type mismatch
+     * Sends tracking log to the server
      */
-    fun sendVehicleDataWithImage(data: Map<String, Any>, cacheDir: File): Boolean {
-        var success = false
+    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String) {
+        try {
+            // Use provided sessionId or fall back to global one
+            val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+            val formattedTimestamp = formatTimestamp(timestamp)
+            val formattedLocation = formatLocation(location)
 
-        Thread {
-            try {
-                // Use explicit cast to handle type safely
-                val dataMap = data as Map<*, *>
+            Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction")
 
-                // Extract and decode the Base64 image
-                val imageBase64 = dataMap["image_data"] as? String ?: run {
-                    Log.e("API", "No image data found in payload")
-                    return@Thread
-                }
-
-                Log.d("API", "Preparing to send vehicle data with image to URL: $UPLOAD_IMAGE_API_URL")
-
-                // Write the base64 image to a temporary file
-                val tempFile = File.createTempFile("vehicle_", ".jpg", cacheDir)
-                val imageBytes = android.util.Base64.decode(imageBase64, android.util.Base64.DEFAULT)
-                FileOutputStream(tempFile).use { it.write(imageBytes) }
-
-                // Create JSON data without the image
-                val dataWithoutImage = HashMap<String, Any>()
-                for ((key, value) in dataMap) {
-                    if (key != "image_data" && key is String) {
-                        dataWithoutImage[key] = value ?: ""
-                    }
-                }
-
-                // Ensure session ID is included
-                if (!dataWithoutImage.containsKey("session_id")) {
-                    dataWithoutImage["session_id"] = globalSessionId
-                }
-
-                val jsonData = JSONObject(dataWithoutImage as Map<*, *>?).toString()
-                Log.d("API", "Image upload JSON data: $jsonData")
-
-                // Create multipart request with image and JSON data
-                val requestBody = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("data", jsonData)
-                    .addFormDataPart(
-                        "image",
-                        "vehicle_${dataMap["vehicle_id"] ?: "unknown"}.jpg",
-                        tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
-                    )
-                    .build()
-
-                val request = Request.Builder()
-                    .url(UPLOAD_IMAGE_API_URL)
-                    .post(requestBody)
-                    .build()
-
-                // Execute request
-                client.newCall(request).execute().use { response ->
-                    // Delete the temporary file
-                    tempFile.delete()
-
-                    if (!response.isSuccessful) {
-                        Log.e("API", "Failed to send vehicle data with image: ${response.code}")
-                        val errorBody = response.body?.string() ?: "Unknown error"
-                        Log.e("API", "Error response: $errorBody")
-                    } else {
-                        val responseBody = response.body?.string() ?: "Empty response"
-                        Log.d("API", "Successfully sent vehicle data with image. Session ID: ${dataWithoutImage["session_id"]}")
-                        Log.d("API", "Response: $responseBody")
-                        success = true
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("API", "Error sending vehicle data with image: ${e.message}", e)
-                e.printStackTrace()
+            val jsonBody = JSONObject().apply {
+                put("device_id", deviceId)
+                put("timestamp", formattedTimestamp)
+                put("location", formattedLocation)
+                put("object_type", objectType)
+                put("direction", direction)
+                put("session_id", actualSessionId)
             }
-        }.start()
 
-        return success
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/tracking")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent tracking log with timestamp: $formattedTimestamp")
+                    } else {
+                        Log.e(TAG, "Error sending tracking log: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending tracking log: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating tracking log request: ${e.message}", e)
+        }
     }
 
     /**
-     * Ensure a data map contains a session ID
+     * Sends a bus image to the server
      */
-    fun ensureSessionId(data: Map<String, Any>): Map<String, Any> {
-        val result = data.toMutableMap()
-        if (!result.containsKey("session_id")) {
-            result["session_id"] = globalSessionId
+    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String) {
+        try {
+            // Use provided sessionId or fall back to global one
+            val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+            val formattedTimestamp = formatTimestamp(timestamp)
+            val formattedLocation = formatLocation(location)
+
+            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}")
+
+            val jsonBody = JSONObject().apply {
+                put("image_data", imageBase64)
+                put("timestamp", formattedTimestamp)
+                put("location", formattedLocation)
+                put("session_id", actualSessionId)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/bus-image")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent bus image with timestamp: $formattedTimestamp")
+                    } else {
+                        Log.e(TAG, "Error sending bus image: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending bus image: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating bus image request: ${e.message}", e)
         }
-        return result
+    }
+
+    /**
+     * Sends a bus image to the server with device ID
+     */
+    fun sendBusImageWithDeviceId(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+        try {
+            // Use provided sessionId or fall back to global one
+            val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+            val formattedTimestamp = formatTimestamp(timestamp)
+            val formattedLocation = formatLocation(location)
+
+            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+
+            val jsonBody = JSONObject().apply {
+                put("image_data", imageBase64)
+                put("timestamp", formattedTimestamp)
+                put("location", formattedLocation)
+                put("session_id", actualSessionId)
+                put("device_id", deviceId)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/bus-image")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent bus image with device ID: $deviceId and timestamp: $formattedTimestamp")
+                    } else {
+                        Log.e(TAG, "Error sending bus image: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending bus image: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating bus image request: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Sends vehicle data with image to the server
+     * Used for sending exit events with captured images
+     */
+    fun sendVehicleDataWithImage(data: Map<String, Any>, cacheDir: File) {
+        try {
+            Log.d(TAG, "Sending vehicle data with image")
+
+            // Extract image Base64 data
+            val imageBase64 = data["image_data"] as? String
+            if (imageBase64 == null) {
+                Log.e(TAG, "No image data provided")
+                return
+            }
+
+            // Ensure session ID is included
+            val dataWithSessionId = data.toMutableMap()
+            if (!dataWithSessionId.containsKey("session_id")) {
+                dataWithSessionId["session_id"] = globalSessionId
+            }
+
+            // Ensure timestamp is properly formatted
+            if (dataWithSessionId.containsKey("timestamp")) {
+                dataWithSessionId["timestamp"] = formatTimestamp(dataWithSessionId["timestamp"])
+            } else if (dataWithSessionId.containsKey("exit_timestamp")) {
+                dataWithSessionId["timestamp"] = formatTimestamp(dataWithSessionId["exit_timestamp"])
+            } else {
+                dataWithSessionId["timestamp"] = formatTimestamp(null)
+            }
+
+            // Ensure location is properly formatted
+            val location = formatLocation(
+                if (dataWithSessionId.containsKey("location")) {
+                    dataWithSessionId["location"] as? String
+                } else {
+                    val x = dataWithSessionId["exit_position_x"] ?: dataWithSessionId["position_x"]
+                    val y = dataWithSessionId["exit_position_y"] ?: dataWithSessionId["position_y"]
+                    if (x != null && y != null) "${x},${y}" else null
+                }
+            )
+            dataWithSessionId["location"] = location
+
+            // Create JSON with all data except image
+            val dataWithoutImage = dataWithSessionId.filter { it.key != "image_data" }
+            val jsonString = JSONObject(dataWithoutImage).toString()
+
+            // Prepare multipart request
+            val jsonPart = RequestBody.create(
+                "application/json; charset=utf-8".toMediaTypeOrNull(),
+                jsonString
+            )
+
+            // Add parts to multipart builder
+            val requestBody = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("data", null, jsonPart)
+                .build()
+
+            // Build request
+            val request = Request.Builder()
+                .url("$BASE_URL/upload-image")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent vehicle data with image, timestamp: ${dataWithSessionId["timestamp"]}")
+                    } else {
+                        Log.e(TAG, "Error sending vehicle data with image: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending vehicle data with image: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating vehicle data with image request: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Sends a bus entry image to the server
+     */
+    fun sendBusEntryImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+        try {
+            // Use provided sessionId or fall back to global one
+            val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+            val formattedTimestamp = formatTimestamp(timestamp)
+            val formattedLocation = formatLocation(location)
+
+            Log.d(TAG, "Sending bus ENTRY image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+
+            val jsonBody = JSONObject().apply {
+                put("image_data", imageBase64)
+                put("timestamp", formattedTimestamp)
+                put("location", formattedLocation)
+                put("session_id", actualSessionId)
+                put("device_id", deviceId)
+                put("event_type", "entry") // Specify this is an entry event
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/bus-image")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent bus ENTRY image with device ID: $deviceId and timestamp: $formattedTimestamp")
+                    } else {
+                        Log.e(TAG, "Error sending bus ENTRY image: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending bus ENTRY image: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating bus ENTRY image request: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Sends a bus exit image to the server
+     */
+    fun sendBusExitImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+        try {
+            // Use provided sessionId or fall back to global one
+            val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+            val formattedTimestamp = formatTimestamp(timestamp)
+            val formattedLocation = formatLocation(location)
+
+            Log.d(TAG, "Sending bus EXIT image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+
+            val jsonBody = JSONObject().apply {
+                put("image_data", imageBase64)
+                put("timestamp", formattedTimestamp)
+                put("location", formattedLocation)
+                put("session_id", actualSessionId)
+                put("device_id", deviceId)
+                put("event_type", "exit") // Specify this is an exit event
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/bus-image")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        Log.d(TAG, "Successfully sent bus EXIT image with device ID: $deviceId and timestamp: $formattedTimestamp")
+                    } else {
+                        Log.e(TAG, "Error sending bus EXIT image: ${response.code} - ${response.message}")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception sending bus EXIT image: ${e.message}")
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating bus EXIT image request: ${e.message}", e)
+        }
     }
 }

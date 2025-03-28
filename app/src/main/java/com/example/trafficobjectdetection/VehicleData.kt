@@ -19,8 +19,8 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import com.example.trafficobjectdetection.api.ApiHelper
 
 /**
  * VehicleTracker - Tracks vehicles across frames and reports entry/exit events
@@ -33,6 +33,18 @@ class VehicleTracker(
 
     // Store tracking data for vehicles that have been detected
     private val vehicles = ConcurrentHashMap<String, VehicleData>()
+
+    // Track which class+id combinations have been reported to avoid duplicate reports
+    private val reportedVehicles = ConcurrentHashMap<String, Long>()
+
+    // Track which specific bus images have been sent to avoid duplicates
+    private val reportedBusImages = ConcurrentHashMap<String, Long>()
+
+    // Cooldown time in milliseconds before sending another image of the same bus
+    private val BUS_IMAGE_COOLDOWN = 5000L // 5 seconds
+
+    // Minimum distance (in normalized coordinates) a bus needs to move before sending another image
+    private val MIN_DISTANCE_FOR_NEW_IMAGE = 0.1f
 
     // List of vehicle-type classes to track
     private val vehicleClasses = setOf("car", "truck", "bus", "motorcycle", "bicycle", "cup")
@@ -53,7 +65,10 @@ class VehicleTracker(
     var testMode = false
 
     // Session ID for grouping tracked objects
-    private val sessionId = UUID.randomUUID().toString()
+    private val sessionId = ApiHelper.getSessionId()
+
+    // Flag to indicate if we should only capture entry/exit images (true) or all frames (false)
+    private val captureOnlyEntryExit = true
 
     /**
      * Initialize the tracker if not already initialized
@@ -87,12 +102,6 @@ class VehicleTracker(
 
             // Only process vehicle classes
             if (className in vehicleClasses) {
-                // Special handling for bus class - send an image to the bus_images collection
-                if (className == "bus" && currentFrameBitmap != null) {
-                    Log.d("VehicleTracker", "Bus detected, sending image to server")
-                    sendBusImageToServer(box, className)
-                }
-
                 // Extract the tracking ID if available
                 val idPart = box.clsName.split(" ").find { it.contains("#") } ?: ""
                 val id = idPart.replace("#", "")
@@ -100,47 +109,156 @@ class VehicleTracker(
                 // Create a unique vehicle key
                 val vehicleKey = "$className-$id"
 
-                // Check if this is a new vehicle
-                if (!vehicles.containsKey(vehicleKey)) {
-                    // New vehicle detected - record entry data
-                    val vehicleData = VehicleData(
-                        id = id,
-                        className = className,
-                        entryTime = System.currentTimeMillis(),
-                        entryPosition = Pair(box.cx, box.cy),
-                        confidence = box.cnf
-                    )
+                // Create a report key combining class and ID
+                val reportKey = "$className-$id"
 
-                    // Capture image if this is a class we want to photograph (e.g., bus or cup)
-                    if (className in captureImageClasses && currentFrameBitmap != null) {
-                        // Capture the whole frame or just crop to the bounding box
-                        vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
+                // Check if this vehicle has been reported recently (within 10 seconds)
+                val hasBeenReportedRecently = reportedVehicles.containsKey(reportKey) &&
+                        (System.currentTimeMillis() - reportedVehicles[reportKey]!!) < 10000
 
-                        // In test mode, save the image locally
-                        if (testMode && context != null) {
-                            saveImageForTesting(vehicleData, "entry")
+                // Special handling for bus class
+                if (className == "bus" && currentFrameBitmap != null) {
+                    if (!vehicles.containsKey(vehicleKey)) {
+                        // New vehicle detected - record entry data
+                        val vehicleData = VehicleData(
+                            id = id,
+                            className = className,
+                            entryTime = System.currentTimeMillis(),
+                            entryPosition = Pair(box.cx, box.cy),
+                            confidence = box.cnf
+                        )
+
+                        // Capture entry image
+                        if (className in captureImageClasses && currentFrameBitmap != null) {
+                            vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
+
+                            // In test mode, save the image locally
+                            if (testMode && context != null) {
+                                saveImageForTesting(vehicleData, "entry")
+                            }
+
+                            // Send entry image to server
+                            if (captureOnlyEntryExit) {
+                                sendBusImageToServer(box, className, "entry")
+                                Log.d("VehicleTracker", "Captured and sent ENTRY image for $className ID: $id")
+                            }
                         }
 
-                        Log.d("VehicleTracker", "Captured image for $className ID: $id")
+                        vehicles[vehicleKey] = vehicleData
+                        reportVehicleEntry(vehicleData)
+
+                        // Mark this vehicle as reported
+                        reportedVehicles[reportKey] = System.currentTimeMillis()
+                    } else {
+                        // Update existing vehicle data
+                        val vehicleData = vehicles[vehicleKey]!!
+                        vehicleData.lastPosition = Pair(box.cx, box.cy)
+                        vehicleData.lastUpdateTime = System.currentTimeMillis()
+                        vehicleData.confidence = box.cnf
+
+                        // Check if the vehicle is at the edge and likely to exit
+                        if (isNearEdge(box) && !vehicleData.exitReported) {
+                            vehicleData.exitPosition = Pair(box.cx, box.cy)
+                            vehicleData.exitTime = System.currentTimeMillis()
+                            vehicleData.exitReported = true
+
+                            // Capture exit image
+                            if (className in captureImageClasses && currentFrameBitmap != null) {
+                                vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
+
+                                // Send exit image to server
+                                if (captureOnlyEntryExit) {
+                                    sendBusImageToServer(box, className, "exit")
+                                    Log.d("VehicleTracker", "Captured and sent EXIT image for $className ID: $id")
+                                }
+                            }
+
+                            // Report vehicle exit
+                            reportVehicleExit(vehicleData)
+
+                            // Mark this vehicle as reported
+                            reportedVehicles[reportKey] = System.currentTimeMillis()
+                        } else if (!captureOnlyEntryExit) {
+                            // Only send continuous images if captureOnlyEntryExit is false
+                            // This is the original continuous image capture logic
+                            val busPosition = "${box.cx},${box.cy}"
+                            val busImageKey = "bus-$id-$busPosition"
+
+                            val lastSent = reportedBusImages[busImageKey]
+                            val now = System.currentTimeMillis()
+
+                            // Check if we've sent this bus image from a similar position recently
+                            val shouldSendImage = lastSent == null ||
+                                    (now - lastSent > BUS_IMAGE_COOLDOWN &&
+                                            !hasNearbyBusImageBeenSent(box.cx, box.cy, id))
+
+                            if (shouldSendImage) {
+                                Log.d("VehicleTracker", "Bus detected, sending continuous image to server")
+                                sendBusImageToServer(box, className, "continuous")
+
+                                // Mark this position as sent
+                                reportedBusImages[busImageKey] = now
+                            }
+                        }
                     }
+                }
+                // Handle other vehicles (cars, cups, etc.) - similar logic but for other vehicle types
+                else if (className in vehicleClasses && !hasBeenReportedRecently) {
+                    if (!vehicles.containsKey(vehicleKey)) {
+                        // New vehicle detected - record entry data
+                        val vehicleData = VehicleData(
+                            id = id,
+                            className = className,
+                            entryTime = System.currentTimeMillis(),
+                            entryPosition = Pair(box.cx, box.cy),
+                            confidence = box.cnf
+                        )
 
-                    vehicles[vehicleKey] = vehicleData
-                    reportVehicleEntry(vehicleData)
-                } else {
-                    // Update existing vehicle data
-                    val vehicleData = vehicles[vehicleKey]!!
-                    vehicleData.lastPosition = Pair(box.cx, box.cy)
-                    vehicleData.lastUpdateTime = System.currentTimeMillis()
-                    vehicleData.confidence = box.cnf
+                        // Capture image if this is a class we want to photograph
+                        if (className in captureImageClasses && currentFrameBitmap != null) {
+                            vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
 
-                    // Check if the vehicle is at the edge and likely to exit
-                    if (isNearEdge(box) && !vehicleData.exitReported) {
-                        vehicleData.exitPosition = Pair(box.cx, box.cy)
-                        vehicleData.exitTime = System.currentTimeMillis()
-                        vehicleData.exitReported = true
+                            // In test mode, save the image locally
+                            if (testMode && context != null) {
+                                saveImageForTesting(vehicleData, "entry")
+                            }
+                        }
 
-                        // Report vehicle exit with image if available
-                        reportVehicleExit(vehicleData)
+                        vehicles[vehicleKey] = vehicleData
+                        reportVehicleEntry(vehicleData)
+
+                        // Mark this vehicle as reported
+                        reportedVehicles[reportKey] = System.currentTimeMillis()
+                    } else {
+                        // Update existing vehicle data
+                        val vehicleData = vehicles[vehicleKey]!!
+                        vehicleData.lastPosition = Pair(box.cx, box.cy)
+                        vehicleData.lastUpdateTime = System.currentTimeMillis()
+                        vehicleData.confidence = box.cnf
+
+                        // Check if the vehicle is at the edge and likely to exit
+                        if (isNearEdge(box) && !vehicleData.exitReported) {
+                            vehicleData.exitPosition = Pair(box.cx, box.cy)
+                            vehicleData.exitTime = System.currentTimeMillis()
+                            vehicleData.exitReported = true
+
+                            // Capture exit image if this class should have images
+                            if (className in captureImageClasses && currentFrameBitmap != null) {
+                                vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
+
+                                // Send exit image to server if it's a bus
+                                if (captureOnlyEntryExit && className == "bus") {
+                                    sendBusImageToServer(box, className, "exit")
+                                    Log.d("VehicleTracker", "Captured and sent EXIT image for $className ID: $id")
+                                }
+                            }
+
+                            // Report vehicle exit
+                            reportVehicleExit(vehicleData)
+
+                            // Mark this vehicle as reported
+                            reportedVehicles[reportKey] = System.currentTimeMillis()
+                        }
                     }
                 }
             }
@@ -151,9 +269,46 @@ class VehicleTracker(
     }
 
     /**
+     * Check if a bus image has been sent from a nearby position
+     */
+    private fun hasNearbyBusImageBeenSent(cx: Float, cy: Float, id: String): Boolean {
+        // Look through all reported bus images and check if any are close to this position
+        for (key in reportedBusImages.keys) {
+            if (key.startsWith("bus-$id-")) {
+                try {
+                    // Extract the position from the key (format: "bus-id-x,y")
+                    val positionPart = key.substringAfter("bus-$id-")
+                    val parts = positionPart.split(",")
+                    if (parts.size == 2) {
+                        val savedX = parts[0].toFloat()
+                        val savedY = parts[1].toFloat()
+
+                        // Calculate distance in normalized coordinates
+                        val dx = cx - savedX
+                        val dy = cy - savedY
+                        val distance = kotlin.math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+
+                        // If the distance is less than threshold, consider it close enough
+                        if (distance < MIN_DISTANCE_FOR_NEW_IMAGE) {
+                            return true
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("VehicleTracker", "Error parsing position from key: $key", e)
+                }
+            }
+        }
+        return false
+    }
+
+    /**
      * Send bus image to server for storage in bus_images collection
      */
-    private fun sendBusImageToServer(box: BoundingBox, className: String) {
+    private fun sendBusImageToServer(box: BoundingBox, className: String, eventType: String = "continuous") {
+        // Extract ID from box.clsName (it contains something like "bus #1")
+        val idPart = box.clsName.split(" ").find { it.contains("#") } ?: ""
+        val deviceId = idPart.replace("#", "")
+
         // Don't capture if no bitmap available
         if (currentFrameBitmap == null) {
             Log.e("VehicleTracker", "Cannot send bus image: currentFrameBitmap is null")
@@ -164,7 +319,7 @@ class VehicleTracker(
             // Capture the image
             val capturedBitmap = captureVehicleImage(currentFrameBitmap!!, box)
 
-            // Get current timestamp
+            // Get current timestamp in consistent format
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
 
             // Convert bitmap to base64
@@ -173,34 +328,61 @@ class VehicleTracker(
             // Generate location string from the bounding box center
             val location = "${box.cx},${box.cy}"
 
-            Log.d("VehicleTracker", "Captured bus image, size: ${capturedBitmap.width}x${capturedBitmap.height}")
+            Log.d("VehicleTracker", "Captured bus image for $eventType event, size: ${capturedBitmap.width}x${capturedBitmap.height}")
             Log.d("VehicleTracker", "Base64 image length: ${imageBase64.length}")
-            Log.d("VehicleTracker", "Preparing to send bus image to server. Session ID: $sessionId")
+            Log.d("VehicleTracker", "Preparing to send bus $eventType image to server. Session ID: $sessionId, Device ID: $deviceId")
 
             // Send to the server directly using ApiHelper
-            com.example.trafficobjectdetection.api.ApiHelper.sendBusImage(
-                imageBase64,
-                timestamp,
-                location,
-                sessionId
-            )
+            if (deviceId.isNotEmpty()) {
+                when (eventType) {
+                    "entry" -> ApiHelper.sendBusEntryImage(
+                        imageBase64,
+                        timestamp,
+                        location,
+                        sessionId,
+                        deviceId
+                    )
+                    "exit" -> ApiHelper.sendBusExitImage(
+                        imageBase64,
+                        timestamp,
+                        location,
+                        sessionId,
+                        deviceId
+                    )
+                    else -> ApiHelper.sendBusImageWithDeviceId(
+                        imageBase64,
+                        timestamp,
+                        location,
+                        sessionId,
+                        deviceId
+                    )
+                }
+            } else {
+                // Fall back to the standard method if no device ID
+                ApiHelper.sendBusImage(
+                    imageBase64,
+                    timestamp,
+                    location,
+                    sessionId
+                )
+            }
 
             // Save image locally if in test mode
             if (testMode && context != null) {
                 val vehicleData = VehicleData(
-                    id = "test",
+                    id = deviceId.ifEmpty { "unknown" },
                     className = className,
                     entryTime = System.currentTimeMillis(),
                     entryPosition = Pair(box.cx, box.cy),
                     capturedImage = capturedBitmap
                 )
-                saveImageForTesting(vehicleData, "bus_detect")
+                saveImageForTesting(vehicleData, "bus_${eventType}")
             }
 
-            Log.d("VehicleTracker", "Sent bus image to server. Session ID: $sessionId")
+            Log.d("VehicleTracker", "Sent bus $eventType image to server. Session ID: $sessionId")
 
         } catch (e: Exception) {
-            Log.e("VehicleTracker", "Failed to send bus image: ${e.message}", e)
+            Log.e("VehicleTracker", "Failed to send bus $eventType image: ${e.message}", e)
             e.printStackTrace()
         }
     }
@@ -377,14 +559,16 @@ class VehicleTracker(
      * Report vehicle entry to server
      */
     private fun reportVehicleEntry(vehicleData: VehicleData) {
+        // Format timestamp to consistent format
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
+
         val entryData = mutableMapOf(
             "event" to "entry",
             "session_id" to sessionId,
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
-            "timestamp" to vehicleData.entryTime,
-            "position_x" to vehicleData.entryPosition.first,
-            "position_y" to vehicleData.entryPosition.second,
+            "timestamp" to timestamp,
+            "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
             "confidence" to vehicleData.confidence
         )
 
@@ -418,6 +602,10 @@ class VehicleTracker(
             return
         }
 
+        // Format timestamps for consistent server storage
+        val entryTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
+        val exitTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.exitTime))
+
         // Calculate direction based on entry and exit positions, with fixed orientation
         val direction = calculateDirectionFixed(vehicleData.entryPosition, exitPos)
 
@@ -426,12 +614,14 @@ class VehicleTracker(
             "session_id" to sessionId,
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
-            "entry_timestamp" to vehicleData.entryTime,
-            "exit_timestamp" to vehicleData.exitTime,
+            "entry_timestamp" to entryTimestamp,
+            "exit_timestamp" to exitTimestamp,
+            "timestamp" to exitTimestamp, // Adding standard timestamp field
             "entry_position_x" to vehicleData.entryPosition.first,
             "entry_position_y" to vehicleData.entryPosition.second,
             "exit_position_x" to exitPos.first,
             "exit_position_y" to exitPos.second,
+            "location" to "${exitPos.first},${exitPos.second}", // Adding standard location field
             "direction" to direction,
             "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
             "confidence" to vehicleData.confidence
@@ -499,6 +689,16 @@ class VehicleTracker(
         vehicles.entries.removeIf { (_, data) ->
             (currentTime - data.lastUpdateTime > staleThreshold) && data.exitReported
         }
+
+        // Remove old entries from reportedVehicles (after 20 seconds)
+        reportedVehicles.entries.removeIf { (_, timestamp) ->
+            currentTime - timestamp > 20000 // 20 seconds
+        }
+
+        // Remove old entries from reportedBusImages (after 30 seconds)
+        reportedBusImages.entries.removeIf { (_, timestamp) ->
+            currentTime - timestamp > 30000 // 30 seconds
+        }
     }
 
     /**
@@ -508,6 +708,8 @@ class VehicleTracker(
      */
     fun clear() {
         vehicles.clear()
+        reportedVehicles.clear()
+        reportedBusImages.clear()
         isInitialized = false
         Log.d("VehicleTracker", "Vehicle tracker cleared and reset")
     }
