@@ -17,12 +17,18 @@ import java.util.concurrent.TimeUnit
  * Helper methods for sending data to your backend API
  */
 object ApiHelper {
+    // Global server IP address and port (REPLACE WITH YOUR ipv4)
+    private const val SERVER_ADDRESS = "PUTYOURIPV4HERE:5000"
 
     // Your API endpoint for tracking data - update with your actual server address
-    private const val TRACKING_API_URL = "http://PUTYOURIPV4HERE:5000/tracking"
+    // Your API endpoint for tracking data
+    private const val TRACKING_API_URL = "http://$SERVER_ADDRESS/tracking"
 
-    // Your API endpoint for uploading images - update with your actual server address
-    private const val UPLOAD_IMAGE_API_URL = "http://PUTYOURIPV4HERE:5000/upload-image"
+    // Your API endpoint for uploading images
+    private const val UPLOAD_IMAGE_API_URL = "http://$SERVER_ADDRESS/upload-image"
+
+    // Endpoint for bus images
+    private const val BUS_IMAGE_API_URL = "http://$SERVER_ADDRESS/bus-image"
 
     // Store a global session ID that can be accessed by any component
     private var globalSessionId: String = UUID.randomUUID().toString()
@@ -33,6 +39,13 @@ object ApiHelper {
         .writeTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * Get the server address (for checking connections)
+     */
+    fun getServerAddress(): String {
+        return SERVER_ADDRESS
+    }
 
     /**
      * Get the current global session ID
@@ -84,6 +97,8 @@ object ApiHelper {
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
                         Log.e("API", "Failed to send tracking log: ${response.code}")
+                        val errorBody = response.body?.string() ?: "Unknown error"
+                        Log.e("API", "Error response: $errorBody")
                     } else {
                         val responseBody = response.body?.string() ?: "Empty response"
                         Log.d("API", "Successfully sent tracking log. Session ID: $actualSessionId, Response: $responseBody")
@@ -91,6 +106,54 @@ object ApiHelper {
                 }
             } catch (e: Exception) {
                 Log.e("API", "Error sending tracking log: ${e.message}", e)
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
+    /**
+     * Send bus image to API
+     * This is a specialized method for sending bus images to be stored
+     * in the bus_images collection
+     */
+    fun sendBusImage(imageBase64: String, timestamp: String, location: String = "", sessionId: String = "") {
+        // Use provided sessionId or fall back to global one
+        val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
+
+        val json = JSONObject().apply {
+            put("session_id", actualSessionId)
+            put("timestamp", timestamp)
+            put("location", location)
+            put("image_data", imageBase64)
+        }
+
+        Log.d("API", "Preparing to send bus image: session=${actualSessionId}, timestamp=${timestamp}")
+        Log.d("API", "Target URL: $BUS_IMAGE_API_URL")
+        Log.d("API", "Image data length: ${imageBase64.length}")
+
+        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+
+        val request = Request.Builder()
+            .url(BUS_IMAGE_API_URL)
+            .post(requestBody)
+            .build()
+
+        // Execute request in a background thread to avoid NetworkOnMainThreadException
+        Thread {
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e("API", "Failed to send bus image: ${response.code}")
+                        val errorBody = response.body?.string() ?: "Unknown error"
+                        Log.e("API", "Error response: $errorBody")
+                    } else {
+                        val responseBody = response.body?.string() ?: "Empty response"
+                        Log.d("API", "Successfully sent bus image. Session ID: $actualSessionId, Response: $responseBody")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("API", "Error sending bus image: ${e.message}", e)
+                e.printStackTrace()
             }
         }.start()
     }

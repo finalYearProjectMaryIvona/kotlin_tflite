@@ -83,10 +83,16 @@ class VehicleTracker(
         // Process each detected object
         boxes.forEach { box ->
             // Extract the base class name (without tracking ID)
-            val className = box.clsName.split(" ")[0]
+            val className = box.clsName.split(" ")[0].lowercase()
 
             // Only process vehicle classes
             if (className in vehicleClasses) {
+                // Special handling for bus class - send an image to the bus_images collection
+                if (className == "bus" && currentFrameBitmap != null) {
+                    Log.d("VehicleTracker", "Bus detected, sending image to server")
+                    sendBusImageToServer(box, className)
+                }
+
                 // Extract the tracking ID if available
                 val idPart = box.clsName.split(" ").find { it.contains("#") } ?: ""
                 val id = idPart.replace("#", "")
@@ -142,6 +148,61 @@ class VehicleTracker(
 
         // Clean up vehicles that haven't been updated in a while
         cleanupStaleVehicles()
+    }
+
+    /**
+     * Send bus image to server for storage in bus_images collection
+     */
+    private fun sendBusImageToServer(box: BoundingBox, className: String) {
+        // Don't capture if no bitmap available
+        if (currentFrameBitmap == null) {
+            Log.e("VehicleTracker", "Cannot send bus image: currentFrameBitmap is null")
+            return
+        }
+
+        try {
+            // Capture the image
+            val capturedBitmap = captureVehicleImage(currentFrameBitmap!!, box)
+
+            // Get current timestamp
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+
+            // Convert bitmap to base64
+            val imageBase64 = bitmapToBase64(capturedBitmap)
+
+            // Generate location string from the bounding box center
+            val location = "${box.cx},${box.cy}"
+
+            Log.d("VehicleTracker", "Captured bus image, size: ${capturedBitmap.width}x${capturedBitmap.height}")
+            Log.d("VehicleTracker", "Base64 image length: ${imageBase64.length}")
+            Log.d("VehicleTracker", "Preparing to send bus image to server. Session ID: $sessionId")
+
+            // Send to the server directly using ApiHelper
+            com.example.trafficobjectdetection.api.ApiHelper.sendBusImage(
+                imageBase64,
+                timestamp,
+                location,
+                sessionId
+            )
+
+            // Save image locally if in test mode
+            if (testMode && context != null) {
+                val vehicleData = VehicleData(
+                    id = "test",
+                    className = className,
+                    entryTime = System.currentTimeMillis(),
+                    entryPosition = Pair(box.cx, box.cy),
+                    capturedImage = capturedBitmap
+                )
+                saveImageForTesting(vehicleData, "bus_detect")
+            }
+
+            Log.d("VehicleTracker", "Sent bus image to server. Session ID: $sessionId")
+
+        } catch (e: Exception) {
+            Log.e("VehicleTracker", "Failed to send bus image: ${e.message}", e)
+            e.printStackTrace()
+        }
     }
 
     /**
