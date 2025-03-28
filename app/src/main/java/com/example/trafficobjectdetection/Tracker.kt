@@ -20,8 +20,8 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
     // Track last assigned ID for each class type
     private val idRegistry = Collections.synchronizedMap(mutableMapOf<String, Int>())
 
-    // Session ID for this tracking session
-    private val sessionId = UUID.randomUUID().toString()
+    // Use the global session ID
+    private val sessionId = ApiHelper.getSessionId()
 
     data class TrackedObject(
         val id: Int,  // Add unique ID for each tracked object

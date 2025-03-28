@@ -327,6 +327,7 @@ class VehicleTracker(
 
             // Generate location string from the bounding box center
             val location = "${box.cx},${box.cy}"
+            val sessionId = ApiHelper.getSessionId()
 
             Log.d("VehicleTracker", "Captured bus image for $eventType event, size: ${capturedBitmap.width}x${capturedBitmap.height}")
             Log.d("VehicleTracker", "Base64 image length: ${imageBase64.length}")
@@ -564,7 +565,7 @@ class VehicleTracker(
 
         val entryData = mutableMapOf(
             "event" to "entry",
-            "session_id" to sessionId,
+            "session_id" to ApiHelper.getSessionId(),
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
             "timestamp" to timestamp,
@@ -611,7 +612,7 @@ class VehicleTracker(
 
         val exitData = mutableMapOf<String, Any>(
             "event" to "exit",
-            "session_id" to sessionId,
+            "session_id" to ApiHelper.getSessionId(),
             "vehicle_type" to vehicleData.className,
             "vehicle_id" to vehicleData.id,
             "entry_timestamp" to entryTimestamp,

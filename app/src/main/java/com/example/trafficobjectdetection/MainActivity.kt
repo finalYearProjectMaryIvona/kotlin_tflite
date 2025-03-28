@@ -106,6 +106,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                         // Create a copy with session ID if not already present
                         val dataWithSessionId = data.toMutableMap().apply {
                             if (!containsKey("session_id")) {
+                                // Use the global session ID
                                 put("session_id", vehicleTracker.getSessionId())
                             }
                         }
