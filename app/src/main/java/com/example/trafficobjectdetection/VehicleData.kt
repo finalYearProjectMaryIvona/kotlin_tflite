@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
 import android.widget.Toast
+import com.example.trafficobjectdetection.api.ApiHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -20,7 +21,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import com.example.trafficobjectdetection.api.ApiHelper
 
 /**
  * VehicleTracker - Tracks vehicles across frames and reports entry/exit events
@@ -69,6 +69,8 @@ class VehicleTracker(
 
     // Flag to indicate if we should only capture entry/exit images (true) or all frames (false)
     private val captureOnlyEntryExit = true
+
+    private var locationHelper: LocationHelper? = null
 
     /**
      * Initialize the tracker if not already initialized
@@ -329,9 +331,12 @@ class VehicleTracker(
             val location = "${box.cx},${box.cy}"
             val sessionId = ApiHelper.getSessionId()
 
+            // Get GPS location if available
+            val gpsLocation = locationHelper?.getLocationString() ?: ""
+
             Log.d("VehicleTracker", "Captured bus image for $eventType event, size: ${capturedBitmap.width}x${capturedBitmap.height}")
             Log.d("VehicleTracker", "Base64 image length: ${imageBase64.length}")
-            Log.d("VehicleTracker", "Preparing to send bus $eventType image to server. Session ID: $sessionId, Device ID: $deviceId")
+            Log.d("VehicleTracker", "Preparing to send bus $eventType image to server. Session ID: $sessionId, Device ID: $deviceId, GPS: $gpsLocation")
 
             // Send to the server directly using ApiHelper
             if (deviceId.isNotEmpty()) {
@@ -341,21 +346,24 @@ class VehicleTracker(
                         timestamp,
                         location,
                         sessionId,
-                        deviceId
+                        deviceId,
+                        gpsLocation
                     )
                     "exit" -> ApiHelper.sendBusExitImage(
                         imageBase64,
                         timestamp,
                         location,
                         sessionId,
-                        deviceId
+                        deviceId,
+                        gpsLocation
                     )
                     else -> ApiHelper.sendBusImageWithDeviceId(
                         imageBase64,
                         timestamp,
                         location,
                         sessionId,
-                        deviceId
+                        deviceId,
+                        gpsLocation
                     )
                 }
             } else {
@@ -364,7 +372,8 @@ class VehicleTracker(
                     imageBase64,
                     timestamp,
                     location,
-                    sessionId
+                    sessionId,
+                    gpsLocation
                 )
             }
 
@@ -563,6 +572,9 @@ class VehicleTracker(
         // Format timestamp to consistent format
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
 
+        // Get GPS location if available
+        val gpsLocation = locationHelper?.getLocationString() ?: ""
+
         val entryData = mutableMapOf(
             "event" to "entry",
             "session_id" to ApiHelper.getSessionId(),
@@ -570,8 +582,18 @@ class VehicleTracker(
             "vehicle_id" to vehicleData.id,
             "timestamp" to timestamp,
             "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
-            "confidence" to vehicleData.confidence
+            "confidence" to vehicleData.confidence,
+            "gps_location" to gpsLocation
         )
+
+        // Add lat/long separately if available
+        locationHelper?.getLatitude()?.let { lat ->
+            entryData["gps_latitude"] = lat
+        }
+
+        locationHelper?.getLongitude()?.let { lng ->
+            entryData["gps_longitude"] = lng
+        }
 
         // Add image data if available
         vehicleData.capturedImage?.let { bitmap ->
@@ -610,6 +632,8 @@ class VehicleTracker(
         // Calculate direction based on entry and exit positions, with fixed orientation
         val direction = calculateDirectionFixed(vehicleData.entryPosition, exitPos)
 
+        val gpsLocation = locationHelper?.getLocationString() ?: ""
+
         val exitData = mutableMapOf<String, Any>(
             "event" to "exit",
             "session_id" to ApiHelper.getSessionId(),
@@ -625,8 +649,19 @@ class VehicleTracker(
             "location" to "${exitPos.first},${exitPos.second}", // Adding standard location field
             "direction" to direction,
             "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
-            "confidence" to vehicleData.confidence
+            "confidence" to vehicleData.confidence,
+            "gps_location" to gpsLocation
         )
+
+        // Add lat/long separately if available
+        locationHelper?.getLatitude()?.let { lat ->
+            exitData["gps_latitude"] = lat
+        }
+
+        locationHelper?.getLongitude()?.let { lng ->
+            exitData["gps_longitude"] = lng
+        }
+
 
         // In test mode, save the image if available
         if (testMode && context != null && vehicleData.capturedImage != null) {

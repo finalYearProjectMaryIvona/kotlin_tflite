@@ -6,11 +6,9 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
-import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -95,14 +93,14 @@ object ApiHelper {
     /**
      * Sends tracking log to the server
      */
-    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String) {
+    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String, gpsLocation: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction")
+            Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction, GPS:$gpsLocation")
 
             val jsonBody = JSONObject().apply {
                 put("device_id", deviceId)
@@ -111,6 +109,22 @@ object ApiHelper {
                 put("object_type", objectType)
                 put("direction", direction)
                 put("session_id", actualSessionId)
+
+                // Add GPS location if available
+                if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
+                    put("gps_location", gpsLocation)
+
+                    // Also add individual lat/lng if possible
+                    val parts = gpsLocation.split(",")
+                    if (parts.size == 2) {
+                        try {
+                            put("gps_latitude", parts[0].toDouble())
+                            put("gps_longitude", parts[1].toDouble())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
+                        }
+                    }
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
@@ -142,7 +156,7 @@ object ApiHelper {
     /**
      * Sends a bus image to the server
      */
-    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String) {
+    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String, gpsLocation: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -156,7 +170,25 @@ object ApiHelper {
                 put("timestamp", formattedTimestamp)
                 put("location", formattedLocation)
                 put("session_id", actualSessionId)
+
+                // Add GPS location if available
+                if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
+                    put("gps_location", gpsLocation)
+
+                    // Also add individual lat/lng if possible
+                    val parts = gpsLocation.split(",")
+                    if (parts.size == 2) {
+                        try {
+                            put("gps_latitude", parts[0].toDouble())
+                            put("gps_longitude", parts[1].toDouble())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
+                        }
+                    }
+                }
             }
+
+
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             val requestBody = jsonBody.toString().toRequestBody(mediaType)
@@ -187,7 +219,7 @@ object ApiHelper {
     /**
      * Sends a bus image to the server with device ID
      */
-    fun sendBusImageWithDeviceId(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+    fun sendBusImageWithDeviceId(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -202,6 +234,22 @@ object ApiHelper {
                 put("location", formattedLocation)
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
+
+                // Add GPS location if available
+                if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
+                    put("gps_location", gpsLocation)
+
+                    // Also add individual lat/lng if possible
+                    val parts = gpsLocation.split(",")
+                    if (parts.size == 2) {
+                        try {
+                            put("gps_latitude", parts[0].toDouble())
+                            put("gps_longitude", parts[1].toDouble())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
+                        }
+                    }
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
@@ -315,7 +363,7 @@ object ApiHelper {
     /**
      * Sends a bus entry image to the server
      */
-    fun sendBusEntryImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+    fun sendBusEntryImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -331,6 +379,22 @@ object ApiHelper {
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
                 put("event_type", "entry") // Specify this is an entry event
+
+                // Add GPS location if available
+                if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
+                    put("gps_location", gpsLocation)
+
+                    // Also add individual lat/lng if possible
+                    val parts = gpsLocation.split(",")
+                    if (parts.size == 2) {
+                        try {
+                            put("gps_latitude", parts[0].toDouble())
+                            put("gps_longitude", parts[1].toDouble())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
+                        }
+                    }
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
@@ -362,7 +426,7 @@ object ApiHelper {
     /**
      * Sends a bus exit image to the server
      */
-    fun sendBusExitImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String) {
+    fun sendBusExitImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -378,6 +442,22 @@ object ApiHelper {
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
                 put("event_type", "exit") // Specify this is an exit event
+
+                // Add GPS location if available
+                if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
+                    put("gps_location", gpsLocation)
+
+                    // Also add individual lat/lng if possible
+                    val parts = gpsLocation.split(",")
+                    if (parts.size == 2) {
+                        try {
+                            put("gps_latitude", parts[0].toDouble())
+                            put("gps_longitude", parts[1].toDouble())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
+                        }
+                    }
+                }
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()

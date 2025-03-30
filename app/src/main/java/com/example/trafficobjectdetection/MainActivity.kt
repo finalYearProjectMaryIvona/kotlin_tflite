@@ -48,6 +48,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
 
+    // Location helper for GPS tracking
+    private lateinit var locationHelper: LocationHelper
     // Object detection model
     private var detector: Detector? = null
 
@@ -124,6 +126,13 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             context = this // Pass context for test mode
         )
 
+        locationHelper = LocationHelper(this, binding.locationText)
+        // Update UI for GPS display
+        binding.locationText.visibility = View.VISIBLE
+        binding.locationText.text = "GPS: Waiting..."
+
+        requestLocationPermissions()
+
         // Initialize a single-thread executor for running camera tasks
         cameraExecutor = Executors.newSingleThreadExecutor()
 
@@ -153,6 +162,19 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         // Setup test mode switch
         setupTestModeSwitch()
     }
+
+    private fun requestLocationPermissions() {
+        if (LOCATION_PERMISSIONS.all {
+                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+            }) {
+            // We have permissions, start updates
+            locationHelper.startLocationUpdates()
+        } else {
+            // Request permissions
+            locationPermissionLauncher.launch(LOCATION_PERMISSIONS)
+        }
+    }
+
 
     // Create test directory for saving images
     private fun createTestDirectory() {
@@ -403,13 +425,15 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         // Execute in background thread
         cameraExecutor.execute {
             try {
+                val dataWithLocation = data.toMutableMap().apply {
+                    // Add GPS coordinates
+                    put("gps_latitude", locationHelper.getLatitude()?.toString() ?: "unknown")
+                    put("gps_longitude", locationHelper.getLongitude()?.toString() ?: "unknown")
+                    put("gps_location", locationHelper.getLocationString())
+                }
+
                 // Example implementation - replace with your actual database API call
                 Log.d("Database", "Would upload vehicle data: ${JSONObject(data)}")
-
-                // Here's where you'd implement your actual database upload
-                // For example with Firebase:
-                // val databaseRef = FirebaseDatabase.getInstance().reference
-                // databaseRef.child("vehicles").push().setValue(data)
 
                 // Or with a custom API:
                 val deviceId = data["vehicle_id"]?.toString() ?: ""
@@ -418,8 +442,9 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 val objectType = data["vehicle_type"]?.toString() ?: ""
                 val direction = data["direction"]?.toString() ?: ""
                 val sessionId = data["session_id"]?.toString() ?: ""
+                val gpsLocation = dataWithLocation["gps_location"]?.toString() ?: ""
 
-                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId)
+                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId, gpsLocation)
 
             } catch (e: Exception) {
                 Log.e("Database", "Error uploading vehicle data: ${e.message}")
@@ -434,11 +459,19 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         // Execute in background thread
         cameraExecutor.execute {
             try {
+                // Add GPS location to the data
+                val dataWithLocation = data.toMutableMap().apply {
+                    // Add GPS coordinates
+                    put("gps_latitude", locationHelper.getLatitude()?.toString() ?: "unknown")
+                    put("gps_longitude", locationHelper.getLongitude()?.toString() ?: "unknown")
+                    put("gps_location", locationHelper.getLocationString())
+                }
+
                 Log.d("Database", "Would upload vehicle data with image")
 
                 // Here you'd implement your actual database upload with image
                 // For example, using our ApiHelper:
-                ApiHelper.sendVehicleDataWithImage(data, cacheDir)
+                ApiHelper.sendVehicleDataWithImage(dataWithLocation, cacheDir)
 
             } catch (e: Exception) {
                 Log.e("Database", "Error uploading vehicle data with image: ${e.message}")
@@ -458,6 +491,18 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         if (it[Manifest.permission.CAMERA] == true) { startCamera() }
     }
 
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.entries.all { it.value }
+        if (allGranted) {
+            // Start location updates when permissions are granted
+            locationHelper.startLocationUpdates()
+        } else {
+            toast("Location permissions are required for GPS tracking")
+        }
+    }
+
     // Show toast messages safely from background threads
     private fun toast(message: String) {
         runOnUiThread {
@@ -471,6 +516,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         detector?.close() // Close the object detector
         cameraExecutor.shutdown() // Shutdown the background executor
         vehicleTracker.clear() // Clear vehicle tracking data
+        locationHelper.stopLocationUpdates()
     }
 
     // Restart camera when returning to the app
@@ -480,6 +526,10 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             startCamera()
         } else {
             requestPermissionLauncher.launch(REQUIRED_PERMISSIONS)
+        }
+
+        if (locationHelper.hasLocationPermissions()) {
+            locationHelper.startLocationUpdates()
         }
     }
 
@@ -494,6 +544,12 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
         }.toTypedArray()
+
+        private val LOCATION_PERMISSIONS = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
     }
 
     // Callback function when no object is detected
