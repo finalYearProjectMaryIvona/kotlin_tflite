@@ -93,7 +93,8 @@ object ApiHelper {
     /**
      * Sends tracking log to the server
      */
-    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String, gpsLocation: String = "") {
+    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String, gpsLocation: String = "", userId: String = "",
+                        isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -124,6 +125,12 @@ object ApiHelper {
                             Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
                         }
                     }
+                }
+
+                // user information
+                if (userId.isNotEmpty()) {
+                    put("user_id", userId)
+                    put("is_public", isPublic)
                 }
             }
 
@@ -156,7 +163,8 @@ object ApiHelper {
     /**
      * Sends a bus image to the server
      */
-    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String, gpsLocation: String = "") {
+    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String = "", gpsLocation: String = "", userId: String = "",
+                     isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
@@ -170,6 +178,11 @@ object ApiHelper {
                 put("timestamp", formattedTimestamp)
                 put("location", formattedLocation)
                 put("session_id", actualSessionId)
+
+                // Add device ID if available
+                if (deviceId.isNotEmpty()) {
+                    put("device_id", deviceId)
+                }
 
                 // Add GPS location if available
                 if (gpsLocation.isNotEmpty() && gpsLocation != "unknown,unknown") {
@@ -185,6 +198,12 @@ object ApiHelper {
                             Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
                         }
                     }
+                }
+
+                // Add user information
+                if (userId.isNotEmpty()) {
+                    put("user_id", userId)
+                    put("is_public", isPublic)
                 }
             }
 
@@ -483,6 +502,54 @@ object ApiHelper {
             }.start()
         } catch (e: Exception) {
             Log.e(TAG, "Error creating bus EXIT image request: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Send user login or create new user
+     * Returns user ID if successful, null otherwise
+     */
+    fun sendUserLogin(email: String, callback: (userId: String?) -> Unit) {
+        try {
+            val jsonBody = JSONObject().apply {
+                put("email", email)
+            }
+
+            val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+            val requestBody = jsonBody.toString().toRequestBody(mediaType)
+
+            val request = Request.Builder()
+                .url("$BASE_URL/login")
+                .post(requestBody)
+                .build()
+
+            // Execute in background thread
+            Thread {
+                try {
+                    val response = client.newCall(request).execute()
+                    if (response.isSuccessful) {
+                        val responseBody = response.body?.string() ?: ""
+                        try {
+                            val jsonResponse = JSONObject(responseBody)
+                            val userId = jsonResponse.optString("user_id", "")
+                            Log.d(TAG, "Login successful, user ID: $userId")
+                            callback(userId)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error parsing login response: ${e.message}")
+                            callback(null)
+                        }
+                    } else {
+                        Log.e(TAG, "Error logging in: ${response.code} - ${response.message}")
+                        callback(null)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception during login: ${e.message}")
+                    callback(null)
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating login request: ${e.message}", e)
+            callback(null)
         }
     }
 }

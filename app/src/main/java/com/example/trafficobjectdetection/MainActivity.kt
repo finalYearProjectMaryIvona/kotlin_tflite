@@ -2,6 +2,7 @@ package com.example.trafficobjectdetection
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
@@ -52,6 +53,8 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
     private lateinit var locationHelper: LocationHelper
     // Object detection model
     private var detector: Detector? = null
+
+    private var isSessionPublic = false
 
     // Tracker for object detection
     private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
@@ -126,6 +129,15 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             context = this // Pass context for test mode
         )
 
+        // Add session privacy switch toggle
+        binding.switchSessionPrivacy.isChecked = UserSessionManager.shouldMakeSessionsPublic()
+        isSessionPublic = UserSessionManager.shouldMakeSessionsPublic()
+        binding.switchSessionPrivacy.setOnCheckedChangeListener { _, isChecked ->
+            isSessionPublic = isChecked
+            UserSessionManager.setMakeSessionsPublic(isChecked, this)
+            toast(if (isChecked) "Session will be public" else "Session will be private")
+        }
+
         locationHelper = LocationHelper(this, binding.locationText)
         // Update UI for GPS display
         binding.locationText.visibility = View.VISIBLE
@@ -161,6 +173,27 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Setup test mode switch
         setupTestModeSwitch()
+    }
+
+    private fun bindSessionData() {
+        if (UserSessionManager.isLoggedIn()) {
+            val userId = UserSessionManager.getUserId()
+            val userEmail = UserSessionManager.getUserEmail()
+
+            // Pass the user ID to the vehicle tracker
+            vehicleTracker.setUserId(userId)
+
+            // Set the session public/private state
+            isSessionPublic = UserSessionManager.shouldMakeSessionsPublic()
+            binding.switchSessionPrivacy.isChecked = isSessionPublic
+
+            Log.d(TAG, "Session bound to user: $userEmail ($userId)")
+        } else {
+            // Handle case where user is not logged in
+            Log.w(TAG, "No user logged in, redirecting to login screen")
+            startActivity(Intent(this, LoginActivity::class.java))
+            finish()
+        }
     }
 
     private fun requestLocationPermissions() {
@@ -317,6 +350,14 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                     buttonView.setBackgroundColor(ContextCompat.getColor(baseContext, R.color.gray))
                 }
             }
+
+            // Privacy switch listener (updating from the onCreate method)
+            switchSessionPrivacy.setOnCheckedChangeListener { _, isChecked ->
+                isSessionPublic = isChecked
+                UserSessionManager.setMakeSessionsPublic(isChecked, this@MainActivity)
+                toast(if (isChecked) "Session will be public" else "Session will be private")
+                vehicleTracker.setSessionPublic(isChecked)
+            }
         }
     }
 
@@ -430,6 +471,16 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                     put("gps_latitude", locationHelper.getLatitude()?.toString() ?: "unknown")
                     put("gps_longitude", locationHelper.getLongitude()?.toString() ?: "unknown")
                     put("gps_location", locationHelper.getLocationString())
+
+                    // user ID and session visibility
+                    put("user_id", UserSessionManager.getUserId())
+                    put("is_public", isSessionPublic)
+
+                    // Make sure session ID is present
+                    if (!containsKey("session_id")) {
+                        put("session_id", vehicleTracker.getSessionId())
+                    }
+
                 }
 
                 // Example implementation - replace with your actual database API call
@@ -443,8 +494,11 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                 val direction = data["direction"]?.toString() ?: ""
                 val sessionId = data["session_id"]?.toString() ?: ""
                 val gpsLocation = dataWithLocation["gps_location"]?.toString() ?: ""
+                val userId = data["user_id"]?.toString() ?: ""
+                val isPublic = data["is_public"] as? Boolean ?: false
 
-                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId, gpsLocation)
+
+                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId, gpsLocation, userId, isPublic)
 
             } catch (e: Exception) {
                 Log.e("Database", "Error uploading vehicle data: ${e.message}")
@@ -465,6 +519,15 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
                     put("gps_latitude", locationHelper.getLatitude()?.toString() ?: "unknown")
                     put("gps_longitude", locationHelper.getLongitude()?.toString() ?: "unknown")
                     put("gps_location", locationHelper.getLocationString())
+
+                    // user ID and session visibility
+                    put("user_id", UserSessionManager.getUserId())
+                    put("is_public", isSessionPublic)
+
+                    // Make sure session ID is present
+                    if (!containsKey("session_id")) {
+                        put("session_id", vehicleTracker.getSessionId())
+                    }
                 }
 
                 Log.d("Database", "Would upload vehicle data with image")

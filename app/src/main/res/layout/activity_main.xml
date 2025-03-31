@@ -20,7 +20,6 @@
         app:layout_constraintVertical_bias="0.5"
         app:scaleType="fillStart" />
 
-
     <!-- OverlayView for Bounding Boxes -->
     <com.example.trafficobjectdetection.OverlayView
         android:id="@+id/overlay"
@@ -45,13 +44,29 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"/>
 
+    <TextView
+        android:id="@+id/locationText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="GPS: Waiting..."
+        android:textColor="#FFFFFF"
+        android:background="#80000000"
+        android:padding="4dp"
+        android:textSize="12sp"
+        android:layout_marginTop="8dp"
+        android:layout_marginStart="8dp"
+        android:visibility="visible"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@color/white"
-        android:paddingVertical="4dp"
+        android:paddingVertical="16dp"
         app:layout_constraintBottom_toBottomOf="parent">
 
+        <!-- GPU Toggle Button in center -->
         <ToggleButton
             android:id="@+id/isGpu"
             android:background="@color/orange"
@@ -63,47 +78,54 @@
             app:layout_constraintBottom_toBottomOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintVertical_bias="0.5" />
+            app:layout_constraintTop_toTopOf="parent" />
 
+        <!-- Public Session Row -->
+        <TextView
+            android:id="@+id/sessionPrivacyLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Public Session"
+            android:textColor="#000000"
+            android:textSize="16sp"
+            android:layout_marginStart="24dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toTopOf="@+id/testModeLabel"
+            android:layout_marginBottom="16dp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchSessionPrivacy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:checked="false"
+            android:layout_marginEnd="24dp"
+            app:layout_constraintTop_toTopOf="@+id/sessionPrivacyLabel"
+            app:layout_constraintBottom_toBottomOf="@+id/sessionPrivacyLabel"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Test Mode Row -->
         <TextView
             android:id="@+id/testModeLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Test Mode"
-            android:textSize="12sp"
-            android:textColor="@android:color/white"
-            android:visibility="gone"
-            android:layout_marginTop="16dp"
-            app:layout_constraintTop_toBottomOf="@id/isGpu"
-            app:layout_constraintEnd_toEndOf="@id/isGpu" />
-
-        <TextView
-            android:id="@+id/locationText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="GPS: Waiting..."
-            android:textColor="#FFFFFF"
-            android:background="#80000000"
-            android:padding="4dp"
-            android:textSize="12sp"
-            android:layout_marginTop="8dp"
-            android:layout_marginStart="8dp"
+            android:textSize="16sp"
+            android:textColor="#000000"
             android:visibility="visible"
-            app:layout_constraintTop_toTopOf="parent"
-            app:layout_constraintStart_toStartOf="parent" />
+            android:layout_marginStart="24dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent" />
 
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/switchTestMode"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Test"
-            android:textSize="12sp"
-            android:visibility="gone"
-            android:layout_marginTop="4dp"
-            app:layout_constraintTop_toBottomOf="@id/testModeLabel"
-            app:layout_constraintEnd_toEndOf="@id/isGpu" />
-
+            android:visibility="visible"
+            android:layout_marginEnd="24dp"
+            app:layout_constraintTop_toTopOf="@+id/testModeLabel"
+            app:layout_constraintBottom_toBottomOf="@+id/testModeLabel"
+            app:layout_constraintEnd_toEndOf="parent" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

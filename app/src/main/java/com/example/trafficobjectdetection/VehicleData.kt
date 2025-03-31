@@ -72,6 +72,24 @@ class VehicleTracker(
 
     private var locationHelper: LocationHelper? = null
 
+    private var userId: String = ""
+    private var isSessionPublic: Boolean = false
+
+    /**
+     * Set the user ID for this tracking session
+     */
+    fun setUserId(id: String) {
+        userId = id
+        Log.d("VehicleTracker", "User ID set: $userId")
+    }
+
+    /**
+     * Set whether this session should be public
+     */
+    fun setSessionPublic(isPublic: Boolean) {
+        isSessionPublic = isPublic
+        Log.d("VehicleTracker", "Session visibility set to public: $isPublic")
+    }
     /**
      * Initialize the tracker if not already initialized
      */
@@ -583,7 +601,9 @@ class VehicleTracker(
             "timestamp" to timestamp,
             "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
             "confidence" to vehicleData.confidence,
-            "gps_location" to gpsLocation
+            "gps_location" to gpsLocation,
+            "user_id" to userId,
+            "is_public" to isSessionPublic
         )
 
         // Add lat/long separately if available
@@ -650,7 +670,9 @@ class VehicleTracker(
             "direction" to direction,
             "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
             "confidence" to vehicleData.confidence,
-            "gps_location" to gpsLocation
+            "gps_location" to gpsLocation,
+            "user_id" to userId,
+            "is_public" to isSessionPublic
         )
 
         // Add lat/long separately if available
