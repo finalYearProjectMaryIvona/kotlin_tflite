@@ -130,7 +130,7 @@ class LoginActivity : AppCompatActivity() {
             val requestBody = jsonBody.toString().toRequestBody(mediaType)
 
             // Get the server IP from a constant or configuration
-            val serverBaseUrl = "http://PUTYOURIPV4HERE:5000"
+            val serverBaseUrl = "http://192.168.0.144:5000"
 
             val request = Request.Builder()
                 .url("$serverBaseUrl/login")

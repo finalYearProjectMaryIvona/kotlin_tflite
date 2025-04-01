@@ -22,7 +22,7 @@ object ApiHelper {
     private const val TAG = "ApiHelper"
 
     // Server URL (replace with your actual server IP address)
-    private const val BASE_URL = "http://PUTYOURIPV4HERE:5000"
+    private const val BASE_URL = "http://192.168.0.144:5000"
 
     // Store a global session ID that can be accessed by any component
     private var globalSessionId: String = UUID.randomUUID().toString()
