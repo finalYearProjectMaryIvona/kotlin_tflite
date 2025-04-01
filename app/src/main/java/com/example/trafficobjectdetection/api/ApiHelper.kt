@@ -100,14 +100,16 @@ object ApiHelper {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
-            val formattedLocation = formatLocation(location)
+            // We don't need to format location anymore
+            // val formattedLocation = formatLocation(location)
 
             Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction, GPS:$gpsLocation, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("device_id", deviceId)
                 put("timestamp", formattedTimestamp)
-                put("location", formattedLocation)
+                // Remove the location field
+                // put("location", formattedLocation)
                 put("object_type", objectType)
                 put("direction", direction)
                 put("session_id", actualSessionId)
@@ -243,14 +245,12 @@ object ApiHelper {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
-            val formattedLocation = formatLocation(location)
 
             Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}, device ID: $deviceId, user ID: $userId, public: $isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
                 put("timestamp", formattedTimestamp)
-                put("location", formattedLocation)
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
 
@@ -395,14 +395,12 @@ object ApiHelper {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
-            val formattedLocation = formatLocation(location)
 
             Log.d(TAG, "Sending bus ENTRY image, base64 length: ${imageBase64.length}, device ID: $deviceId, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
                 put("timestamp", formattedTimestamp)
-                put("location", formattedLocation)
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
                 put("event_type", "entry") // Specify this is an entry event
@@ -466,14 +464,12 @@ object ApiHelper {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
-            val formattedLocation = formatLocation(location)
 
             Log.d(TAG, "Sending bus EXIT image, base64 length: ${imageBase64.length}, device ID: $deviceId, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
                 put("timestamp", formattedTimestamp)
-                put("location", formattedLocation)
                 put("session_id", actualSessionId)
                 put("device_id", deviceId)
                 put("event_type", "exit") // Specify this is an exit event

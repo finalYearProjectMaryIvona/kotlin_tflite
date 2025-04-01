@@ -138,13 +138,12 @@ class Tracker(private val maxDisappeared: Int = 50, private val listener: Tracke
                         if (!loggedObjects.contains(trackedObject.id)) {
                             val deviceId = trackedObject.id.toString()
                             val timestamp = getCurrentTime()
-                            val location = "${trackedObject.centroid.first},${trackedObject.centroid.second}"
                             val objectType = trackedObject.className
                             val direction = trackedObject.direction
 
                             // Use the ApiHelper directly to ensure it works
                             try {
-                                ApiHelper.sendTrackingLog(deviceId, timestamp, location, objectType, direction, sessionId)
+                                ApiHelper.sendTrackingLog(deviceId, timestamp,"", objectType, direction, sessionId)
                                 Log.d("Tracker", "Sent tracking log for $objectType ID:$deviceId, Session:$sessionId")
                             } catch (e: Exception) {
                                 Log.e("Tracker", "Failed to send tracking log: ${e.message}", e)

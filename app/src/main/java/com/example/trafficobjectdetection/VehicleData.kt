@@ -369,7 +369,7 @@ class VehicleTracker(
                     "entry" -> ApiHelper.sendBusEntryImage(
                         imageBase64,
                         timestamp,
-                        location,
+                        "",
                         sessionId,
                         deviceId,
                         gpsLocation,
@@ -379,7 +379,7 @@ class VehicleTracker(
                     "exit" -> ApiHelper.sendBusExitImage(
                         imageBase64,
                         timestamp,
-                        location,
+                        "",
                         sessionId,
                         deviceId,
                         gpsLocation,
@@ -389,7 +389,7 @@ class VehicleTracker(
                     else -> ApiHelper.sendBusImageWithDeviceId(
                         imageBase64,
                         timestamp,
-                        location,
+                        "",
                         sessionId,
                         deviceId,
                         gpsLocation,
@@ -402,7 +402,7 @@ class VehicleTracker(
                 ApiHelper.sendBusImage(
                     imageBase64,
                     timestamp,
-                    location,
+                    "",
                     sessionId,
                     gpsLocation,
                     userId,
@@ -638,7 +638,6 @@ class VehicleTracker(
                 "vehicle_type" to vehicleData.className,
                 "vehicle_id" to vehicleData.id,
                 "timestamp" to timestamp,
-                "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
                 "confidence" to vehicleData.confidence,
                 "gps_location" to gpsLocation,
                 "user_id" to userId,
@@ -725,7 +724,6 @@ class VehicleTracker(
                 "entry_position_y" to vehicleData.entryPosition.second,
                 "exit_position_x" to exitPos.first,
                 "exit_position_y" to exitPos.second,
-                "location" to "${exitPos.first},${exitPos.second}", // Adding standard location field
                 "direction" to direction,
                 "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
                 "confidence" to vehicleData.confidence,
