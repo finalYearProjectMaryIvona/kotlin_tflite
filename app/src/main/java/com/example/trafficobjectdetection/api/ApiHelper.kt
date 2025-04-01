@@ -91,17 +91,18 @@ object ApiHelper {
     }
 
     /**
-     * Sends tracking log to the server
+     * Sends tracking log to the server with GPS and user data
      */
-    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String, direction: String, sessionId: String, gpsLocation: String = "", userId: String = "",
-                        isPublic: Boolean = false) {
+    fun sendTrackingLog(deviceId: String, timestamp: String, location: String, objectType: String,
+                        direction: String, sessionId: String, gpsLocation: String = "",
+                        userId: String = "", isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction, GPS:$gpsLocation")
+            Log.d(TAG, "Sending tracking log for $objectType ID:$deviceId, Direction:$direction, GPS:$gpsLocation, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("device_id", deviceId)
@@ -127,11 +128,9 @@ object ApiHelper {
                     }
                 }
 
-                // user information
-                if (userId.isNotEmpty()) {
-                    put("user_id", userId)
-                    put("is_public", isPublic)
-                }
+                // Add user information
+                put("user_id", userId)
+                put("is_public", isPublic)
             }
 
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
@@ -161,17 +160,18 @@ object ApiHelper {
     }
 
     /**
-     * Sends a bus image to the server
+     * Sends a bus image to the server with GPS and user data
      */
-    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String = "", gpsLocation: String = "", userId: String = "",
-                     isPublic: Boolean = false) {
+    fun sendBusImage(imageBase64: String, timestamp: String, location: String, sessionId: String,
+                     gpsLocation: String = "", userId: String = "", isPublic: Boolean = false,
+                     deviceId: String = "") {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}")
+            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
@@ -207,8 +207,6 @@ object ApiHelper {
                 }
             }
 
-
-
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             val requestBody = jsonBody.toString().toRequestBody(mediaType)
 
@@ -236,16 +234,18 @@ object ApiHelper {
     }
 
     /**
-     * Sends a bus image to the server with device ID
+     * Sends a bus image to the server with device ID and user data
      */
-    fun sendBusImageWithDeviceId(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
+    fun sendBusImageWithDeviceId(imageBase64: String, timestamp: String, location: String,
+                                 sessionId: String, deviceId: String, gpsLocation: String = "",
+                                 userId: String = "", isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+            Log.d(TAG, "Sending bus image, base64 length: ${imageBase64.length}, device ID: $deviceId, user ID: $userId, public: $isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
@@ -268,6 +268,12 @@ object ApiHelper {
                             Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
                         }
                     }
+                }
+
+                // Add user data
+                if (userId.isNotEmpty()) {
+                    put("user_id", userId)
+                    put("is_public", isPublic)
                 }
             }
 
@@ -380,16 +386,18 @@ object ApiHelper {
     }
 
     /**
-     * Sends a bus entry image to the server
+     * Sends a bus entry image to the server with GPS and user data
      */
-    fun sendBusEntryImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
+    fun sendBusEntryImage(imageBase64: String, timestamp: String, location: String, sessionId: String,
+                          deviceId: String, gpsLocation: String = "", userId: String = "",
+                          isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending bus ENTRY image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+            Log.d(TAG, "Sending bus ENTRY image, base64 length: ${imageBase64.length}, device ID: $deviceId, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
@@ -413,6 +421,12 @@ object ApiHelper {
                             Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
                         }
                     }
+                }
+
+                // Add user information
+                if (userId.isNotEmpty()) {
+                    put("user_id", userId)
+                    put("is_public", isPublic)
                 }
             }
 
@@ -443,16 +457,18 @@ object ApiHelper {
     }
 
     /**
-     * Sends a bus exit image to the server
+     * Sends a bus exit image to the server with GPS and user data
      */
-    fun sendBusExitImage(imageBase64: String, timestamp: String, location: String, sessionId: String, deviceId: String, gpsLocation: String = "") {
+    fun sendBusExitImage(imageBase64: String, timestamp: String, location: String, sessionId: String,
+                         deviceId: String, gpsLocation: String = "", userId: String = "",
+                         isPublic: Boolean = false) {
         try {
             // Use provided sessionId or fall back to global one
             val actualSessionId = if (sessionId.isNotEmpty()) sessionId else globalSessionId
             val formattedTimestamp = formatTimestamp(timestamp)
             val formattedLocation = formatLocation(location)
 
-            Log.d(TAG, "Sending bus EXIT image, base64 length: ${imageBase64.length}, device ID: $deviceId")
+            Log.d(TAG, "Sending bus EXIT image, base64 length: ${imageBase64.length}, device ID: $deviceId, UserId:$userId, Public:$isPublic")
 
             val jsonBody = JSONObject().apply {
                 put("image_data", imageBase64)
@@ -476,6 +492,12 @@ object ApiHelper {
                             Log.e(TAG, "Error parsing GPS coordinates: ${e.message}")
                         }
                     }
+                }
+
+                // Add user information
+                if (userId.isNotEmpty()) {
+                    put("user_id", userId)
+                    put("is_public", isPublic)
                 }
             }
 

@@ -21,6 +21,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * VehicleTracker - Tracks vehicles across frames and reports entry/exit events
@@ -158,17 +160,14 @@ class VehicleTracker(
                             }
 
                             // Send entry image to server
-                            if (captureOnlyEntryExit) {
+                            if (!reportedVehicles.containsKey(reportKey)) {
                                 sendBusImageToServer(box, className, "entry")
                                 Log.d("VehicleTracker", "Captured and sent ENTRY image for $className ID: $id")
+                                reportedVehicles[reportKey] = System.currentTimeMillis()
                             }
                         }
 
                         vehicles[vehicleKey] = vehicleData
-                        reportVehicleEntry(vehicleData)
-
-                        // Mark this vehicle as reported
-                        reportedVehicles[reportKey] = System.currentTimeMillis()
                     } else {
                         // Update existing vehicle data
                         val vehicleData = vehicles[vehicleKey]!!
@@ -176,52 +175,29 @@ class VehicleTracker(
                         vehicleData.lastUpdateTime = System.currentTimeMillis()
                         vehicleData.confidence = box.cnf
 
-                        // Check if the vehicle is at the edge and likely to exit
+                        // Only for exit events
                         if (isNearEdge(box) && !vehicleData.exitReported) {
                             vehicleData.exitPosition = Pair(box.cx, box.cy)
                             vehicleData.exitTime = System.currentTimeMillis()
                             vehicleData.exitReported = true
 
                             // Capture exit image
-                            if (className in captureImageClasses && currentFrameBitmap != null) {
+                            if (currentFrameBitmap != null) {
                                 vehicleData.capturedImage = captureVehicleImage(currentFrameBitmap!!, box)
 
-                                // Send exit image to server
-                                if (captureOnlyEntryExit) {
-                                    sendBusImageToServer(box, className, "exit")
-                                    Log.d("VehicleTracker", "Captured and sent EXIT image for $className ID: $id")
+                                // Test mode saving
+                                if (testMode && context != null) {
+                                    saveImageForTesting(vehicleData, "exit")
                                 }
-                            }
 
-                            // Report vehicle exit
-                            reportVehicleExit(vehicleData)
-
-                            // Mark this vehicle as reported
-                            reportedVehicles[reportKey] = System.currentTimeMillis()
-                        } else if (!captureOnlyEntryExit) {
-                            // Only send continuous images if captureOnlyEntryExit is false
-                            // This is the original continuous image capture logic
-                            val busPosition = "${box.cx},${box.cy}"
-                            val busImageKey = "bus-$id-$busPosition"
-
-                            val lastSent = reportedBusImages[busImageKey]
-                            val now = System.currentTimeMillis()
-
-                            // Check if we've sent this bus image from a similar position recently
-                            val shouldSendImage = lastSent == null ||
-                                    (now - lastSent > BUS_IMAGE_COOLDOWN &&
-                                            !hasNearbyBusImageBeenSent(box.cx, box.cy, id))
-
-                            if (shouldSendImage) {
-                                Log.d("VehicleTracker", "Bus detected, sending continuous image to server")
-                                sendBusImageToServer(box, className, "continuous")
-
-                                // Mark this position as sent
-                                reportedBusImages[busImageKey] = now
+                                // Send exit image only once
+                                sendBusImageToServer(box, className, "exit")
+                                Log.d("VehicleTracker", "Captured and sent EXIT image for $className ID: $id")
                             }
                         }
                     }
                 }
+
                 // Handle other vehicles (cars, cups, etc.) - similar logic but for other vehicle types
                 else if (className in vehicleClasses && !hasBeenReportedRecently) {
                     if (!vehicles.containsKey(vehicleKey)) {
@@ -245,7 +221,14 @@ class VehicleTracker(
                         }
 
                         vehicles[vehicleKey] = vehicleData
-                        reportVehicleEntry(vehicleData)
+
+                        // Only send a single entry to avoid duplicates - this is the key change
+                        // Adding a small delay to allow GPS to be acquired
+                        scope.launch(Dispatchers.IO) {
+                            // Wait a tiny bit before sending to allow GPS to catch up
+                            delay(200)
+                            reportVehicleEntry(vehicleData)
+                        }
 
                         // Mark this vehicle as reported
                         reportedVehicles[reportKey] = System.currentTimeMillis()
@@ -286,6 +269,15 @@ class VehicleTracker(
 
         // Clean up vehicles that haven't been updated in a while
         cleanupStaleVehicles()
+    }
+
+    /**
+     * Set the LocationHelper for GPS data
+     * This allows the tracker to get real GPS coordinates
+     */
+    fun setLocationHelper(helper: LocationHelper) {
+        locationHelper = helper
+        Log.d("VehicleTracker", "LocationHelper set for GPS data")
     }
 
     /**
@@ -335,28 +327,43 @@ class VehicleTracker(
             return
         }
 
-        try {
-            // Capture the image
-            val capturedBitmap = captureVehicleImage(currentFrameBitmap!!, box)
+        // Capture the image
+        val capturedBitmap = captureVehicleImage(currentFrameBitmap!!, box)
 
-            // Get current timestamp in consistent format
-            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        // Generate location string from the bounding box center
+        val location = "${box.cx},${box.cy}"
+        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+        val imageBase64 = bitmapToBase64(capturedBitmap)
+        val sessionId = ApiHelper.getSessionId()
 
-            // Convert bitmap to base64
-            val imageBase64 = bitmapToBase64(capturedBitmap)
+        // Wait for GPS data with timeout
+        scope.launch(Dispatchers.IO) {
+            // Try to get GPS data with waiting
+            var gpsLocation = locationHelper?.getLocationString() ?: ""
+            var gpsLatitude = locationHelper?.getLatitude()
+            var gpsLongitude = locationHelper?.getLongitude()
 
-            // Generate location string from the bounding box center
-            val location = "${box.cx},${box.cy}"
-            val sessionId = ApiHelper.getSessionId()
+            // Wait up to 2 seconds for GPS data if not available
+            var waitTime = 0
+            val maxWaitTime = 2000 // 2 seconds max wait
 
-            // Get GPS location if available
-            val gpsLocation = locationHelper?.getLocationString() ?: ""
+            while ((gpsLocation.isEmpty() || gpsLocation == "unknown,unknown" ||
+                        gpsLatitude == null || gpsLongitude == null) &&
+                waitTime < maxWaitTime) {
+                delay(500)  // Wait 500ms between checks
+                waitTime += 500
 
-            Log.d("VehicleTracker", "Captured bus image for $eventType event, size: ${capturedBitmap.width}x${capturedBitmap.height}")
-            Log.d("VehicleTracker", "Base64 image length: ${imageBase64.length}")
-            Log.d("VehicleTracker", "Preparing to send bus $eventType image to server. Session ID: $sessionId, Device ID: $deviceId, GPS: $gpsLocation")
+                // Try to get GPS data again
+                gpsLocation = locationHelper?.getLocationString() ?: ""
+                gpsLatitude = locationHelper?.getLatitude()
+                gpsLongitude = locationHelper?.getLongitude()
 
-            // Send to the server directly using ApiHelper
+                Log.d("VehicleTracker", "Waiting for GPS data, time waited: ${waitTime}ms: $gpsLocation")
+            }
+
+            Log.d("VehicleTracker", "Final GPS data: $gpsLocation")
+
+            // Now send data with whatever GPS info we have (even if it's still empty)
             if (deviceId.isNotEmpty()) {
                 when (eventType) {
                     "entry" -> ApiHelper.sendBusEntryImage(
@@ -365,7 +372,9 @@ class VehicleTracker(
                         location,
                         sessionId,
                         deviceId,
-                        gpsLocation
+                        gpsLocation,
+                        userId,
+                        isSessionPublic
                     )
                     "exit" -> ApiHelper.sendBusExitImage(
                         imageBase64,
@@ -373,7 +382,9 @@ class VehicleTracker(
                         location,
                         sessionId,
                         deviceId,
-                        gpsLocation
+                        gpsLocation,
+                        userId,
+                        isSessionPublic
                     )
                     else -> ApiHelper.sendBusImageWithDeviceId(
                         imageBase64,
@@ -381,7 +392,9 @@ class VehicleTracker(
                         location,
                         sessionId,
                         deviceId,
-                        gpsLocation
+                        gpsLocation,
+                        userId,
+                        isSessionPublic
                     )
                 }
             } else {
@@ -391,7 +404,9 @@ class VehicleTracker(
                     timestamp,
                     location,
                     sessionId,
-                    gpsLocation
+                    gpsLocation,
+                    userId,
+                    isSessionPublic
                 )
             }
 
@@ -407,11 +422,7 @@ class VehicleTracker(
                 saveImageForTesting(vehicleData, "bus_${eventType}")
             }
 
-            Log.d("VehicleTracker", "Sent bus $eventType image to server. Session ID: $sessionId")
-
-        } catch (e: Exception) {
-            Log.e("VehicleTracker", "Failed to send bus $eventType image: ${e.message}", e)
-            e.printStackTrace()
+            Log.d("VehicleTracker", "Sent bus $eventType image to server with GPS: $gpsLocation")
         }
     }
 
@@ -587,50 +598,69 @@ class VehicleTracker(
      * Report vehicle entry to server
      */
     private fun reportVehicleEntry(vehicleData: VehicleData) {
-        // Format timestamp to consistent format
-        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
+        scope.launch(Dispatchers.IO) {
+            // Format timestamp
+            val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
 
-        // Get GPS location if available
-        val gpsLocation = locationHelper?.getLocationString() ?: ""
+            // Try to get GPS data with waiting
+            var gpsLocation = locationHelper?.getLocationString() ?: ""
+            var gpsLatitude = locationHelper?.getLatitude()
+            var gpsLongitude = locationHelper?.getLongitude()
 
-        val entryData = mutableMapOf(
-            "event" to "entry",
-            "session_id" to ApiHelper.getSessionId(),
-            "vehicle_type" to vehicleData.className,
-            "vehicle_id" to vehicleData.id,
-            "timestamp" to timestamp,
-            "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
-            "confidence" to vehicleData.confidence,
-            "gps_location" to gpsLocation,
-            "user_id" to userId,
-            "is_public" to isSessionPublic
-        )
+            // Wait up to 2 seconds for GPS data if not available
+            var waitTime = 0
+            val maxWaitTime = 2000 // 2 seconds max wait
 
-        // Add lat/long separately if available
-        locationHelper?.getLatitude()?.let { lat ->
-            entryData["gps_latitude"] = lat
-        }
+            while ((gpsLocation.isEmpty() || gpsLocation == "unknown,unknown" ||
+                        gpsLatitude == null || gpsLongitude == null) &&
+                waitTime < maxWaitTime) {
+                delay(500)  // Wait 500ms between checks
+                waitTime += 500
 
-        locationHelper?.getLongitude()?.let { lng ->
-            entryData["gps_longitude"] = lng
-        }
+                // Try to get GPS data again
+                gpsLocation = locationHelper?.getLocationString() ?: ""
+                gpsLatitude = locationHelper?.getLatitude()
+                gpsLongitude = locationHelper?.getLongitude()
 
-        // Add image data if available
-        vehicleData.capturedImage?.let { bitmap ->
-            // Only add if it's a class we want to capture
-            if (vehicleData.className in captureImageClasses) {
-                entryData["has_image"] = true
-                // Note: You might not want to send the actual image on entry
-                // to save bandwidth, just indicate that there is an image
+                Log.d("VehicleTracker", "Waiting for GPS data for ${vehicleData.className}, time waited: ${waitTime}ms: $gpsLocation")
             }
-        }
 
-        // Log the entry details
-        Log.d("VehicleTracker", "ENTRY DATA: $entryData")
+            // Skip sending if we don't have GPS data and user ID
+            if ((gpsLocation.isEmpty() || gpsLocation == "unknown,unknown" ||
+                        gpsLatitude == null || gpsLongitude == null || userId.isEmpty())) {
+                Log.d("VehicleTracker", "Skipping entry for ${vehicleData.className} - missing GPS or user data")
+                return@launch
+            }
 
-        // Send to server if reporter is available and not in test mode
-        if (!testMode) {
-            serverReporter?.sendData(entryData)
+            val entryData = mutableMapOf(
+                "event" to "entry",
+                "session_id" to ApiHelper.getSessionId(),
+                "vehicle_type" to vehicleData.className,
+                "vehicle_id" to vehicleData.id,
+                "timestamp" to timestamp,
+                "location" to "${vehicleData.entryPosition.first},${vehicleData.entryPosition.second}",
+                "confidence" to vehicleData.confidence,
+                "gps_location" to gpsLocation,
+                "user_id" to userId,
+                "is_public" to isSessionPublic
+            )
+
+            // Add lat/long separately if available
+            gpsLatitude?.let { lat ->
+                entryData["gps_latitude"] = lat
+            }
+
+            gpsLongitude?.let { lng ->
+                entryData["gps_longitude"] = lng
+            }
+
+            // Log the entry details
+            Log.d("VehicleTracker", "ENTRY DATA with GPS $gpsLocation: $entryData")
+
+            // Send to server if reporter is available and not in test mode
+            if (!testMode) {
+                serverReporter?.sendData(entryData)
+            }
         }
     }
 
@@ -645,69 +675,79 @@ class VehicleTracker(
             return
         }
 
-        // Format timestamps for consistent server storage
-        val entryTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
-        val exitTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.exitTime))
+        scope.launch(Dispatchers.IO) {
+            // Format timestamps
+            val entryTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.entryTime))
+            val exitTimestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(vehicleData.exitTime))
 
-        // Calculate direction based on entry and exit positions, with fixed orientation
-        val direction = calculateDirectionFixed(vehicleData.entryPosition, exitPos)
+            // Calculate direction
+            val direction = calculateDirectionFixed(vehicleData.entryPosition, exitPos)
 
-        val gpsLocation = locationHelper?.getLocationString() ?: ""
+            // Try to get GPS data with waiting
+            var gpsLocation = locationHelper?.getLocationString() ?: ""
+            var gpsLatitude = locationHelper?.getLatitude()
+            var gpsLongitude = locationHelper?.getLongitude()
 
-        val exitData = mutableMapOf<String, Any>(
-            "event" to "exit",
-            "session_id" to ApiHelper.getSessionId(),
-            "vehicle_type" to vehicleData.className,
-            "vehicle_id" to vehicleData.id,
-            "entry_timestamp" to entryTimestamp,
-            "exit_timestamp" to exitTimestamp,
-            "timestamp" to exitTimestamp, // Adding standard timestamp field
-            "entry_position_x" to vehicleData.entryPosition.first,
-            "entry_position_y" to vehicleData.entryPosition.second,
-            "exit_position_x" to exitPos.first,
-            "exit_position_y" to exitPos.second,
-            "location" to "${exitPos.first},${exitPos.second}", // Adding standard location field
-            "direction" to direction,
-            "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
-            "confidence" to vehicleData.confidence,
-            "gps_location" to gpsLocation,
-            "user_id" to userId,
-            "is_public" to isSessionPublic
-        )
+            // Wait up to 2 seconds for GPS data if not available
+            var waitTime = 0
+            val maxWaitTime = 2000 // 2 seconds max wait
 
-        // Add lat/long separately if available
-        locationHelper?.getLatitude()?.let { lat ->
-            exitData["gps_latitude"] = lat
-        }
+            while ((gpsLocation.isEmpty() || gpsLocation == "unknown,unknown" ||
+                        gpsLatitude == null || gpsLongitude == null) &&
+                waitTime < maxWaitTime) {
+                delay(500)  // Wait 500ms between checks
+                waitTime += 500
 
-        locationHelper?.getLongitude()?.let { lng ->
-            exitData["gps_longitude"] = lng
-        }
+                // Try to get GPS data again
+                gpsLocation = locationHelper?.getLocationString() ?: ""
+                gpsLatitude = locationHelper?.getLatitude()
+                gpsLongitude = locationHelper?.getLongitude()
 
-
-        // In test mode, save the image if available
-        if (testMode && context != null && vehicleData.capturedImage != null) {
-            saveImageForTesting(vehicleData, "exit")
-        }
-
-        // Add image data if available and it's a class we want images for
-        if (vehicleData.className in captureImageClasses && vehicleData.capturedImage != null) {
-            // In normal mode, convert bitmap to Base64 string for database storage
-            if (!testMode) {
-                val imageBase64 = bitmapToBase64(vehicleData.capturedImage!!)
-                exitData["image_data"] = imageBase64
+                Log.d("VehicleTracker", "Waiting for GPS data for exit ${vehicleData.className}, time waited: ${waitTime}ms: $gpsLocation")
             }
-            exitData["has_image"] = true
 
-            Log.d("VehicleTracker", "Added image data for ${vehicleData.className} ${vehicleData.id}")
-        }
+            // Skip sending if we don't have GPS data and user ID
+            if ((gpsLocation.isEmpty() || gpsLocation == "unknown,unknown" ||
+                        gpsLatitude == null || gpsLongitude == null || userId.isEmpty())) {
+                Log.d("VehicleTracker", "Skipping exit for ${vehicleData.className} - missing GPS or user data")
+                return@launch
+            }
 
-        // Log all the exit data
-        Log.d("VehicleTracker", "EXIT DATA: $exitData")
+            val exitData = mutableMapOf<String, Any>(
+                "event" to "exit",
+                "session_id" to ApiHelper.getSessionId(),
+                "vehicle_type" to vehicleData.className,
+                "vehicle_id" to vehicleData.id,
+                "entry_timestamp" to entryTimestamp,
+                "exit_timestamp" to exitTimestamp,
+                "timestamp" to exitTimestamp, // Adding standard timestamp field
+                "entry_position_x" to vehicleData.entryPosition.first,
+                "entry_position_y" to vehicleData.entryPosition.second,
+                "exit_position_x" to exitPos.first,
+                "exit_position_y" to exitPos.second,
+                "location" to "${exitPos.first},${exitPos.second}", // Adding standard location field
+                "direction" to direction,
+                "time_in_frame_ms" to (vehicleData.exitTime - vehicleData.entryTime),
+                "confidence" to vehicleData.confidence,
+                "gps_location" to gpsLocation,
+                "user_id" to userId,
+                "is_public" to isSessionPublic
+            )
 
-        // Send to server asynchronously if reporter is available and not in test mode
-        if (!testMode) {
-            scope.launch {
+            // Add lat/long separately if available
+            gpsLatitude?.let { lat ->
+                exitData["gps_latitude"] = lat
+            }
+
+            gpsLongitude?.let { lng ->
+                exitData["gps_longitude"] = lng
+            }
+
+            // Log all the exit data
+            Log.d("VehicleTracker", "EXIT DATA with GPS $gpsLocation: $exitData")
+
+            // Send to server if reporter is available and not in test mode
+            if (!testMode) {
                 serverReporter?.sendData(exitData)
             }
         }

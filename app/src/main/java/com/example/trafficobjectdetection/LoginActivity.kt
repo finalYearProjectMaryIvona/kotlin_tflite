@@ -16,6 +16,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 
 /**
@@ -111,16 +112,15 @@ class LoginActivity : AppCompatActivity() {
 
     /**
      * Get user ID for email - either existing or create new
-     * In a real app, this would communicate with your backend
+     * Communicates with the backend to login or create a new user
      */
     private fun getUserIdForEmail(email: String): String {
-        // Simplified implementation for demo
-        // In a real app, you would check if the user exists in your backend
-        // If not, create a new user and return their ID
-
+        // Implementation that calls our backend API
         try {
-            // Example of how you would call your API
-            val client = OkHttpClient()
+            val client = OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(10, TimeUnit.SECONDS)
+                .build()
 
             val jsonBody = JSONObject().apply {
                 put("email", email)
@@ -129,22 +129,37 @@ class LoginActivity : AppCompatActivity() {
             val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
             val requestBody = jsonBody.toString().toRequestBody(mediaType)
 
+            // Get the server IP from a constant or configuration
+            val serverBaseUrl = "http://PUTYOURIPV4HERE:5000"
+
             val request = Request.Builder()
-                .url("http://PUTYOURIPV4HERE:5000/login")
+                .url("$serverBaseUrl/login")
                 .post(requestBody)
                 .build()
 
-            // This would be your actual API call
-            // val response = client.newCall(request).execute()
-            // val responseBody = response.body?.string() ?: ""
-            // return JSONObject(responseBody).getString("userId")
+            // Make a synchronous call (this is in a background thread already)
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string() ?: ""
 
-            // For demo, we'll just use a UUID
-            return UUID.randomUUID().toString()
-
+            if (response.isSuccessful) {
+                try {
+                    val jsonResponse = JSONObject(responseBody)
+                    val userId = jsonResponse.getString("user_id")
+                    Log.d(TAG, "Login successful with server, user ID: $userId")
+                    return userId
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error parsing login response: ${e.message}", e)
+                    // Fall back to UUID on parse error
+                    return UUID.randomUUID().toString()
+                }
+            } else {
+                Log.e(TAG, "Server error on login: ${response.code} - ${responseBody}")
+                // Fall back to UUID on server error
+                return UUID.randomUUID().toString()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting user ID", e)
-            // Fallback to UUID for demo purposes
+            Log.e(TAG, "Network error getting user ID: ${e.message}", e)
+            // Fall back to UUID for network errors
             return UUID.randomUUID().toString()
         }
     }

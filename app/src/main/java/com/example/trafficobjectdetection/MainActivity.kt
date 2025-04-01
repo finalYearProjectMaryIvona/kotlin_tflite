@@ -129,6 +129,15 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             context = this // Pass context for test mode
         )
 
+        // Initialize location helper
+        locationHelper = LocationHelper(this, binding.locationText)
+        // Connect LocationHelper to VehicleTracker
+        vehicleTracker.setLocationHelper(locationHelper)
+
+        // Update UI for GPS display
+        binding.locationText.visibility = View.VISIBLE
+        binding.locationText.text = "GPS: Waiting..."
+
         // Add session privacy switch toggle
         binding.switchSessionPrivacy.isChecked = UserSessionManager.shouldMakeSessionsPublic()
         isSessionPublic = UserSessionManager.shouldMakeSessionsPublic()
@@ -136,12 +145,11 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             isSessionPublic = isChecked
             UserSessionManager.setMakeSessionsPublic(isChecked, this)
             toast(if (isChecked) "Session will be public" else "Session will be private")
+            vehicleTracker.setSessionPublic(isChecked)
         }
 
-        locationHelper = LocationHelper(this, binding.locationText)
-        // Update UI for GPS display
-        binding.locationText.visibility = View.VISIBLE
-        binding.locationText.text = "GPS: Waiting..."
+        // Bind user session data if available
+        bindSessionData()
 
         requestLocationPermissions()
 
@@ -157,9 +165,6 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
 
         // Initialize the vehicle tracker
         vehicleTracker.initialize()
-
-        // Log the session ID when the activity starts
-        Log.d("MainActivity", "Initialized with session ID: ${vehicleTracker.getSessionId()}")
 
         // Check if the required permissions are granted, if yes, start the camera
         if (allPermissionsGranted()) {
