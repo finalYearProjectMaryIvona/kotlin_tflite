@@ -2,9 +2,10 @@ package com.example.trafficobjectdetection.api
 
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import com.example.trafficobjectdetection.Constants
 
 object RetrofitClient {
-    private const val BASE_URL = "http://192.168.0.144:5000/" // Localhost PUTYOURIPV4HERE
+    private const val BASE_URL = Constants.BASE_IP
 
     val instance: ApiService by lazy {
         Retrofit.Builder()

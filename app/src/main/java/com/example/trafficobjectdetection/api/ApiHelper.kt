@@ -14,6 +14,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+import com.example.trafficobjectdetection.Constants
 
 /**
  * Helper class for making API calls to the server
@@ -22,7 +23,7 @@ object ApiHelper {
     private const val TAG = "ApiHelper"
 
     // Server URL (replace with your actual server IP address)
-    private const val BASE_URL = "http://192.168.0.144:5000"
+    private const val BASE_URL = Constants.BASE_IP
 
     // Store a global session ID that can be accessed by any component
     private var globalSessionId: String = UUID.randomUUID().toString()

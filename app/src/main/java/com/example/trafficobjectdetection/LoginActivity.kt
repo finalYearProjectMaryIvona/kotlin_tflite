@@ -18,7 +18,6 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-
 /**
  * Login Activity for handling user authentication
  */
@@ -130,7 +129,7 @@ class LoginActivity : AppCompatActivity() {
             val requestBody = jsonBody.toString().toRequestBody(mediaType)
 
             // Get the server IP from a constant or configuration
-            val serverBaseUrl = "http://192.168.0.144:5000"
+            val serverBaseUrl = Constants.BASE_IP
 
             val request = Request.Builder()
                 .url("$serverBaseUrl/login")
