@@ -104,12 +104,12 @@
             app:layout_constraintBottom_toBottomOf="@+id/sessionPrivacyLabel"
             app:layout_constraintEnd_toEndOf="parent" />
 
-        <!-- Test Mode Row -->
+        <!-- Save image Row -->
         <TextView
             android:id="@+id/testModeLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Test Mode"
+            android:text="Save image"
             android:textSize="16sp"
             android:textColor="#000000"
             android:visibility="visible"

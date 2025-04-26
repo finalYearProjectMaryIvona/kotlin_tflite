@@ -291,27 +291,27 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
         }
     }
 
-    // Setup the test mode switch
+    // Setup the save mode switch
     private fun setupTestModeSwitch() {
-        // Make the test mode switch visible
+        // Make the save mode switch visible
         binding.switchTestMode.visibility = View.VISIBLE
         binding.testModeLabel.visibility = View.VISIBLE
 
         binding.switchTestMode.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
-                // Enable test mode - check for storage permission first
+                // Enable save mode - check for storage permission first
                 if (hasStoragePermission()) {
                     vehicleTracker.testMode = true
-                    toast("Test mode enabled - cup/bus images will be saved")
+                    toast("Save images enabled - bus images will be saved")
                     createTestDirectory()
                 } else {
                     // Request storage permission
                     requestStoragePermission()
                 }
             } else {
-                // Disable test mode
+                // Disable save mode
                 vehicleTracker.testMode = false
-                toast("Test mode disabled")
+                toast("Save images disabled")
             }
         }
     }

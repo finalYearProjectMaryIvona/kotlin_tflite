@@ -4,8 +4,8 @@ package com.example.trafficobjectdetection
  * Constants used throughout the application
  */
 object Constants {
-    // IPv4 PUTYOURIPV4HERE
-    const val BASE_IP = "http://PUTYOURIPV4HERE:5000"
+    // IPv4 PUTYOURIPV4HERE 192.168.0.144
+    const val BASE_IP = "http://192.168.0.144:5000"
 
     // Path to the TFLite model file in the assets folder
     const val MODEL_PATH = "model.tflite"
@@ -19,8 +19,7 @@ object Constants {
         "bicycle",
         "bus",
         "truck",
-        "motorcycle",
-        "cup"  // Kept for testing purposes
+        "motorcycle"
     )
 
     // Detection settings
@@ -38,6 +37,5 @@ object Constants {
         "bus" to Triple(0, 0, 255),       // Blue
         "truck" to Triple(255, 165, 0),   // Orange
         "motorcycle" to Triple(128, 0, 128), // Purple
-        "cup" to Triple(255, 255, 0)      // Yellow
     )
 }
