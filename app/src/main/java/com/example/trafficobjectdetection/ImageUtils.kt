@@ -12,7 +12,7 @@ import android.widget.ImageView
 import java.io.IOException
 
 /**
- * Utility functions for image loading and manipulation
+ * Utility functions for image loading , for home page image
  */
 object ImageUtils {
 

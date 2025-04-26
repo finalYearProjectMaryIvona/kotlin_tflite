@@ -88,7 +88,7 @@ class MainActivity : AppCompatActivity(), Detector.DetectorListener {
             createTestDirectory()
         } else {
             toast("Storage permission denied. Images will be saved to app internal storage.")
-            vehicleTracker.testMode = true // Still enable test mode, but use internal storage
+            vehicleTracker.testMode = true // Still enable test mode/image save, but use internal storage
             binding.switchTestMode.isChecked = true
         }
     }

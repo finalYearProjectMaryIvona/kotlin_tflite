@@ -16,6 +16,10 @@ import org.tensorflow.lite.support.image.ImageProcessor
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
 
+/**
+ * This the main class for handling the object detection using TFLite
+ * Sets up the TFLiteInterpreter, processes the images, integrates with th tracker
+ */
 class Detector(
     private val context: Context,
     private val modelPath: String,
@@ -43,10 +47,15 @@ class Detector(
         .add(CastOp(INPUT_IMAGE_TYPE))
         .build()
 
+    /**
+     * Initilise the detecter by loading the model, setting up the interpreter
+     * and getting the metadata like input dimensions and labels
+     */
     init {
         val compatList = CompatibilityList()
         val options = Interpreter.Options().apply {
             if (compatList.isDelegateSupportedOnThisDevice) {
+                //use gpu delagate if available
                 val delegateOptions = compatList.bestOptionsForThisDevice
                 this.addDelegate(GpuDelegate(delegateOptions))
             } else {
@@ -54,6 +63,7 @@ class Detector(
             }
         }
 
+        //load the model file
         val model = FileUtil.loadMappedFile(context, modelPath)
         interpreter = Interpreter(model, options)
 
@@ -72,6 +82,7 @@ class Detector(
             }
         }
 
+        //configuring the tensor input shapes
         if (inputShape != null) {
             tensorWidth = inputShape[1]
             tensorHeight = inputShape[2]
@@ -82,7 +93,7 @@ class Detector(
                 tensorHeight = inputShape[3]
             }
         }
-
+        //set output dimensions
         if (outputShape != null) {
             numChannel = outputShape[1]
             numElements = outputShape[2]
@@ -90,6 +101,7 @@ class Detector(
     }
 
     // Restart interpreter
+    //optionally with GPU acceleration
     fun restart(isGpu: Boolean) {
         interpreter.close()
         val options = if (isGpu) {
@@ -112,11 +124,13 @@ class Detector(
         interpreter = Interpreter(model, options)
     }
 
+    //close the interpreter
     fun close() {
         interpreter.close()
     }
 
     // Runs object detection on image frame
+    //processes a bitmap image (frame)
     fun detect(frame: Bitmap) {
         if (tensorWidth == 0 || tensorHeight == 0 || numChannel == 0 || numElements == 0) {
             return
@@ -129,19 +143,20 @@ class Detector(
         val tensorImage = TensorImage(INPUT_IMAGE_TYPE)
         tensorImage.load(resizedBitmap)
         val processedImage = imageProcessor.process(tensorImage)
-
+        //preparing the output buffer
         val output = TensorBuffer.createFixedSize(intArrayOf(1, numChannel, numElements), OUTPUT_IMAGE_TYPE)
         interpreter.run(processedImage.buffer, output.buffer)
-
+        //process detection results
         val detectedBoxes = bestBox(output.floatArray)
         inferenceTime = SystemClock.uptimeMillis() - inferenceTime
 
+        //handle empty detection results
         if (detectedBoxes == null || detectedBoxes.isEmpty()) {
             detectorListener.onEmptyDetect()
             return
         }
 
-        // Track objects
+        // Track objects across the frames
         tracker.update(detectedBoxes)
 
         // Get the formatted bounding boxes with IDs
@@ -151,7 +166,7 @@ class Detector(
         detectorListener.onDetect(trackedBoxes, inferenceTime)
     }
 
-    // Extracts bounding boxes
+    // Extracts bounding boxes from the raw model output
     private fun bestBox(array: FloatArray): List<BoundingBox>? {
         val boundingBoxes = mutableListOf<BoundingBox>()
 
@@ -204,15 +219,18 @@ class Detector(
         return applyNMS(boundingBoxes) // Non-Maximum Suppression
     }
 
+    //Apply Non maximum suppression to remove the old bounding boxes
+    //keeps the box with the highest confidence and removes overlapping boxes
     private fun applyNMS(boxes: List<BoundingBox>): MutableList<BoundingBox> {
         val sortedBoxes = boxes.sortedByDescending { it.cnf }.toMutableList()
         val selectedBoxes = mutableListOf<BoundingBox>()
-
+        //take box with highest confidence
         while (sortedBoxes.isNotEmpty()) {
             val first = sortedBoxes.first()
             selectedBoxes.add(first)
             sortedBoxes.remove(first)
 
+            //remove the other boxes that overlap
             val iterator = sortedBoxes.iterator()
             while (iterator.hasNext()) {
                 val nextBox = iterator.next()
@@ -226,6 +244,8 @@ class Detector(
         return selectedBoxes
     }
 
+    //calculate the intersection over union between 2 bounding box
+    //basically seeing if there are overlapping of nms
     private fun calculateIoU(box1: BoundingBox, box2: BoundingBox): Float {
         val x1 = maxOf(box1.x1, box2.x1)
         val y1 = maxOf(box1.y1, box2.y1)
@@ -234,30 +254,37 @@ class Detector(
         val intersectionArea = maxOf(0F, x2 - x1) * maxOf(0F, y2 - y1)
         val box1Area = box1.w * box1.h
         val box2Area = box2.w * box2.h
-
+        //calculate IOU
         return intersectionArea / (box1Area + box2Area - intersectionArea)
     }
 
+    //Interface for receiving detection results
     interface DetectorListener {
+        //when no objects detected
         fun onEmptyDetect()
+        //called when they are detected
         fun onDetect(boundingBoxes: List<BoundingBox>, inferenceTime: Long)
     }
 
     companion object {
+        //constants for image preprocessing
         private const val INPUT_MEAN = 0f
         private const val INPUT_STANDARD_DEVIATION = 255f
         private val INPUT_IMAGE_TYPE = DataType.FLOAT32
         private val OUTPUT_IMAGE_TYPE = DataType.FLOAT32
+        //detection thresholds
         private const val CONFIDENCE_THRESHOLD = 0.45F
         private const val IOU_THRESHOLD = 0.5F
     }
 
+    //data class for tracking objects across frames
     data class TrackedObject(
         var box: BoundingBox,
         var direction: String = "",
         var lastPosition: Pair<Float, Float>? = null
     )
 
+    //internal tracker for tracking objects between frames
     private inner class ObjectTracker {
         private var nextObjectId = 0
         private val objects = mutableMapOf<Int, TrackedObject>()
@@ -369,6 +396,7 @@ class Detector(
             }
         }
 
+        //find matches between exisiting tracked objects
         private fun findMatches(detectedBoxes: List<BoundingBox>): Map<Int, Int> {
             val matches = mutableMapOf<Int, Int>()
             val usedDetections = mutableSetOf<Int>()

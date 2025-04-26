@@ -1,5 +1,6 @@
 package com.example.trafficobjectdetection
 
+//information to draw the bounding box
 data class BoundingBox(
     val x1: Float,
     val y1: Float,

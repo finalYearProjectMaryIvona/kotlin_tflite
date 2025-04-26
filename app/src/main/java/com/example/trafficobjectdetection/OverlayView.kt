@@ -10,6 +10,9 @@ import android.util.AttributeSet
 import android.view.View
 import androidx.core.content.ContextCompat
 
+/**
+ * This class draws the bounding box and class label and id
+ */
 class OverlayView(context: Context?, attrs: AttributeSet?) : View(context, attrs) {
     private var results = listOf<BoundingBox>()
     private var boxPaint = Paint()
