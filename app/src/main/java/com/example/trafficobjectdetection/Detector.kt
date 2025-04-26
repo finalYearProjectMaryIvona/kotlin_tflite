@@ -31,7 +31,7 @@ class Detector(
     private var numElements = 0
 
     // Tracker instance to handle object tracking
-    private val tracker = Tracker(maxDisappeared = 15, object : TrackerListener {
+    private val tracker = Tracker(maxDisappeared = 4, object : TrackerListener {
         override fun onTrackingCleared() {
             detectorListener.onEmptyDetect() // Clears UI when tracking is empty
         }
@@ -261,7 +261,7 @@ class Detector(
     private inner class ObjectTracker {
         private var nextObjectId = 0
         private val objects = mutableMapOf<Int, TrackedObject>()
-        private val maxDisappeared = 15
+        private val maxDisappeared = 4
         private val disappeared = mutableMapOf<Int, Int>()
         private val MERGE_IOU_THRESHOLD = 0.7f // Threshold for merging overlapping boxes
 
