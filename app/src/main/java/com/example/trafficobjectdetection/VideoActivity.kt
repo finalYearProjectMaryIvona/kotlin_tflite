@@ -81,6 +81,19 @@ class VideoActivity : AppCompatActivity() {
             examples of detection in action.
             
             Developed using TensorFlow Lite for on-device machine learning detection.
+            
+            You must give camera and location permissions for the app to work.
+            Try and place your camera enough of a distance away from the road that you get a clear view of the tracking
+            coming and going. It will perform best on a clear day because heavy rain will distort the view.
+            
+            Enabling public mode as soon as you start recording will allow other users to see the data recorded but
+            if you choose not to only you can view the session on the web app.
+            
+            The "save image" switch will save bus images to the phones gallery for your own examination
+             but it is not necessary and the images will still be sent to the database be sent to the database.
+             
+             The above video is an example of a data collecting session using the camera.
+            
         """.trimIndent()
     }
 

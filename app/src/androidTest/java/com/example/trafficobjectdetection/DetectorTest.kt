@@ -14,7 +14,7 @@ class DetectorTest {
     private lateinit var detector: Detector
     private val context: Context = ApplicationProvider.getApplicationContext()
 
-    // ✅ Use a Fake Listener Instead of MockK
+    // Use a Fake Listener Instead of MockK
     private val fakeListener = object : Detector.DetectorListener {
         override fun onEmptyDetect() {
             // No-op (Do nothing)
@@ -27,7 +27,7 @@ class DetectorTest {
 
     @Before
     fun setUp() {
-        // ✅ Fix the constructor by passing a non-null message lambda
+        // Fix the constructor by passing a non-null message lambda
         detector = Detector(context, "model.tflite", "labels.txt", fakeListener) { message ->
             println("Detector message: $message")
         }
@@ -39,7 +39,7 @@ class DetectorTest {
             eraseColor(Color.BLACK) // Fill the bitmap with black color
         }
 
-        // ✅ Run detection on the fake bitmap
+        // Run detection on the fake bitmap
         detector.detect(testBitmap)
     }
 }
