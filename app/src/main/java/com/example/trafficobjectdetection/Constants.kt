@@ -5,7 +5,7 @@ package com.example.trafficobjectdetection
  */
 object Constants {
     // IPv4 PUTYOURIPV4HERE
-    const val BASE_IP = "IPv4:5000"
+    const val BASE_IP = "http://PUTYOURIPV4HERE:5000"
 
     // Path to the TFLite model file in the assets folder
     const val MODEL_PATH = "model.tflite"
