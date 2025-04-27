@@ -16,7 +16,7 @@ import java.io.InputStream
 class VideoActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityVideoBinding
-    private val TEST_VIDEO_PATH = "test_video2.mp4"
+    private val TEST_VIDEO_PATH = "tutorial1.mp4"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
